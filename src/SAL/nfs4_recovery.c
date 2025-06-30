@@ -112,8 +112,7 @@ static void nfs4_recovery_load_clids(nfs_grace_start_t *gsp);
 static void nfs_release_nlm_state(char *release_ip);
 static void nfs_release_v4_clients(char *ip);
 
-clid_entry_t *nfs4_add_clid_entry(char *cl_name,
-					bool reclaim_complete)
+clid_entry_t *nfs4_add_clid_entry(char *cl_name, bool reclaim_complete)
 {
 	clid_entry_t *new_ent = gsh_malloc(sizeof(clid_entry_t));
 
@@ -710,10 +709,9 @@ static bool check_clid(nfs_client_id_t *clientid, clid_entry_t *clid_ent)
 {
 	bool ret = false;
 
-	LogDebug(COMPONENT_CLIENTID,
-		"compare %s to: %s reclaim complete %d",
-		clientid->cid_recov_tag, clid_ent->cl_name,
-		clid_ent->cl_reclaim_complete);
+	LogDebug(COMPONENT_CLIENTID, "compare %s to: %s reclaim complete %d",
+		 clientid->cid_recov_tag, clid_ent->cl_name,
+		 clid_ent->cl_reclaim_complete);
 
 	/**
 	 * If the clid_ent didn't reclaim completely before this grace period,
@@ -722,8 +720,7 @@ static bool check_clid(nfs_client_id_t *clientid, clid_entry_t *clid_ent)
 	 * to reclaim states here. See RFC 8881 Section 8.4.3 for details.
 	 */
 	if (clientid->cid_recov_tag &&
-	    !strncmp(clientid->cid_recov_tag,
-		     clid_ent->cl_name, PATH_MAX)) {
+	    !strncmp(clientid->cid_recov_tag, clid_ent->cl_name, PATH_MAX)) {
 		/* The enforcement works on NFSv4.1 and higher versions. */
 		if (clientid->cid_minorversion > 0)
 			ret = clid_ent->cl_reclaim_complete;
@@ -1127,25 +1124,23 @@ restart:
 #endif /* _USE_NLM */
 }
 
-static int ip_match(char *ip, nfs_client_id_t *cid)
+static int ip_match(sockaddr_t *ip, nfs_client_id_t *cid)
 {
-	char *haystack;
-	char *value = cid->cid_client_record->cr_client_val;
-	int len = cid->cid_client_record->cr_client_val_len;
+	int rc;
+	sockaddr_t *saddr = &cid->cid_client_record->cr_server_addr;
 
-	LogDebug(COMPONENT_STATE, "NFS Server V4 match ip %s with (%.*s)", ip,
-		 len, value);
-
-	if (strlen(ip) == 0) /* No IP all are matching */
-		return 1;
-
-	haystack = alloca(len + 1);
-	memcpy(haystack, value, len);
-	haystack[len] = '\0';
-	if (strstr(haystack, ip) != NULL)
-		return 1;
-
-	return 0; /* no match */
+	if (isFullDebug(COMPONENT_STATE)) {
+		char addr1[SOCK_NAME_MAX] = "\0";
+		char addr2[SOCK_NAME_MAX] = "\0";
+		struct display_buffer db1 = { sizeof(addr1), addr1, addr1 };
+		struct display_buffer db2 = { sizeof(addr2), addr2, addr2 };
+		display_sockaddr_port(&db1, ip, true);
+		display_sockaddr_port(&db2, saddr, true);
+		LogDebug(COMPONENT_STATE, "Match %s with %s", addr1, addr2);
+	}
+	rc = cmp_sockaddr(ip, saddr, true);
+	LogDebug(COMPONENT_STATE, "Match ret=%d", rc);
+	return rc;
 }
 
 /*
@@ -1162,8 +1157,10 @@ static void nfs_release_v4_clients(char *ip)
 	nfs_client_id_t *cp;
 	nfs_client_record_t *recp;
 	int i;
+	sockaddr_t ip_saddr;
 
 	LogEvent(COMPONENT_STATE, "NFS Server V4 recovery release ip %s", ip);
+	ip_str_to_sockaddr(ip, &ip_saddr);
 
 	/* go through the confirmed clients looking for a match */
 	for (i = 0; i < ht->parameter.index_size; i++) {
@@ -1180,7 +1177,7 @@ restart:
 			cp = (nfs_client_id_t *)pdata->val.addr;
 			PTHREAD_MUTEX_lock(&cp->cid_mutex);
 			if ((cp->cid_confirmed == CONFIRMED_CLIENT_ID) &&
-			    ip_match(ip, cp)) {
+			    ip_match(&ip_saddr, cp)) {
 				inc_client_id_ref(cp);
 
 				/* client_record is always non-NULL. */
