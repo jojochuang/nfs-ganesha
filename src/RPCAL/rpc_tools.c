@@ -271,6 +271,14 @@ int ip_str_to_sockaddr(char *ip_str, sockaddr_t *sp)
  */
 int cmp_sockaddr(sockaddr_t *addr_1, sockaddr_t *addr_2, bool ignore_port)
 {
+	sockaddr_t addr_ipv4_1 = {};
+	sockaddr_t addr_ipv4_2 = {};
+
+	if (addr_1->ss_family != addr_2->ss_family) {
+		addr_1 = convert_ipv6_to_ipv4(addr_1, &addr_ipv4_1);
+		addr_2 = convert_ipv6_to_ipv4(addr_2, &addr_ipv4_2);
+	}
+
 	if (addr_1->ss_family != addr_2->ss_family)
 		return 0;
 
