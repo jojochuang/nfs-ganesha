@@ -1026,52 +1026,6 @@ static void nlm_release(state_nsm_client_t *nsm_cp)
 }
 #endif /* _USE_NLM */
 
-void extractv4(char *ipv6, char *ipv4, size_t size)
-{
-	char *token, *saveptr;
-	char *delim = ":";
-
-	token = strtok_r(ipv6, delim, &saveptr);
-	while (token != NULL) {
-		/* IPv4 delimiter is '.' */
-		if (strchr(token, '.') != NULL) {
-			(void)strlcpy(ipv4, token, size);
-			return;
-		}
-		token = strtok_r(NULL, delim, &saveptr);
-	}
-	/* failed, copy a null string */
-	ipv4[0] = '\0';
-}
-
-bool ip_str_match(char *release_ip, char *server_ip)
-{
-	bool ripv6, sipv6;
-	char ipv4[SOCK_NAME_MAX];
-
-	/* IPv6 delimiter is ':' */
-	ripv6 = (strchr(release_ip, ':') != NULL);
-	sipv6 = (strchr(server_ip, ':') != NULL);
-
-	if (ripv6) {
-		if (sipv6)
-			return !strcmp(release_ip, server_ip);
-		else {
-			/* extract v4 addr from release_ip*/
-			extractv4(release_ip, ipv4, sizeof(ipv4));
-			return !strcmp(ipv4, server_ip);
-		}
-	} else {
-		if (sipv6) {
-			/* extract v4 addr from server_ip*/
-			extractv4(server_ip, ipv4, sizeof(ipv4));
-			return !strcmp(ipv4, release_ip);
-		}
-	}
-	/* Both are ipv4 addresses */
-	return !strcmp(release_ip, server_ip);
-}
-
 /**
  * @brief Release all NLM state
  */
@@ -1084,7 +1038,7 @@ static void nfs_release_nlm_state(char *release_ip)
 	struct rbt_head *head_rbt;
 	struct rbt_node *pn;
 	struct hash_data *pdata;
-	char serverip[SOCK_NAME_MAX];
+	sockaddr_t release_addr;
 	int i;
 
 	if (!nfs_param.core_param.enable_NLM)
@@ -1093,6 +1047,8 @@ static void nfs_release_nlm_state(char *release_ip)
 	LogDebug(COMPONENT_STATE, "Release all NLM locks");
 
 	cancel_all_nlm_blocked();
+
+	ip_str_to_sockaddr(release_ip, &release_addr);
 
 	/* walk the client list and call state_nlm_notify */
 	for (i = 0; i < ht->parameter.index_size; i++) {
@@ -1107,9 +1063,8 @@ restart:
 			pdata = RBT_OPAQ(pn);
 			nlm_cp = (state_nlm_client_t *)pdata->val.addr;
 
-			if (sprint_sockip(&nlm_cp->slc_server_addr, serverip,
-					  sizeof(serverip)) &&
-			    ip_str_match(release_ip, serverip)) {
+			if (cmp_sockaddr(&release_addr,
+					 &nlm_cp->slc_server_addr, true)) {
 				nsm_cp = nlm_cp->slc_nsm_client;
 				inc_nsm_client_ref(nsm_cp);
 				PTHREAD_RWLOCK_unlock(
