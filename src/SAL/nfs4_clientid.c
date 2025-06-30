@@ -2084,6 +2084,8 @@ nfs_client_record_t *get_client_record(const char *const value,
 	struct hash_latch latch;
 	hash_error_t rc;
 	int32_t refcount;
+	sockaddr_t server_addr_ipv4;
+	sockaddr_t *server_addr_conv;
 
 	assert(len);
 
@@ -2095,7 +2097,10 @@ nfs_client_record_t *get_client_record(const char *const value,
 	record->cr_unconfirmed_rec = NULL;
 	memcpy(record->cr_client_val, value, len);
 	record->cr_pnfs_flags = pnfs_flags;
-	record->cr_server_addr = *server_addr;
+	/* Canonicalise, does the right thing with IPv4 input */
+	server_addr_conv = convert_ipv6_to_ipv4((sockaddr_t *)server_addr,
+						&server_addr_ipv4);
+	record->cr_server_addr = *server_addr_conv;
 	buffkey.addr = record;
 	buffkey.len = sizeof(*record);
 
