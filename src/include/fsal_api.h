@@ -340,7 +340,7 @@ extern struct gsh_refstr *no_export;
  * changes.
  */
 
-#define FSAL_MAJOR_VERSION 13
+#define FSAL_MAJOR_VERSION 14
 
 /**
  * @brief Minor Version
