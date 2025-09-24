@@ -305,6 +305,7 @@ goption(USE_FSAL_GLUSTER "build GLUSTER FSAL shared library" ON)
 goption(USE_FSAL_NULL "build NULL FSAL shared library" ON)
 goption(USE_FSAL_RGW "build RGW FSAL shared library" ON)
 goption(USE_FSAL_MEM "build Memory FSAL shared library" ON)
+goption(USE_FSAL_OFS "build OFS FSAL shared library" ON)
 goption(USE_FSAL_SAUNAFS "build SAUNAFS FSAL shared library" ON)
 
 # Internal capability required by some FSALs
@@ -378,7 +379,6 @@ goption(USE_CUNIT "Use Cunit test framework" OFF)
 goption(USE_GTEST "Use Google Test test framework" OFF)
 gopt_test(USE_GTEST)
 if(USE_GTEST)
-  find_package(LTTng ${USE_GTEST_REQUIRED})
   find_package(Gperftools ${USE_GTEST_REQUIRED})
   find_package(GTest ${USE_GTEST_REQUIRED})
   find_package(Boost 1.34.0 ${USE_GTEST_REQUIRED} COMPONENTS filesystem program_options)
@@ -922,6 +922,9 @@ gopt_test(USE_FSAL_SAUNAFS)
 gopt_test(USE_FSAL_MEM)
 # MEM has no dependencies
 
+gopt_test(USE_FSAL_OFS)
+# OFS has no dependencies
+
 # sort out which allocator to use
 if(${ALLOCATOR} STREQUAL "jemalloc")
   find_package(JeMalloc)
@@ -1385,6 +1388,7 @@ message(STATUS "USE_FSAL_GPFS = ${USE_FSAL_GPFS}")
 message(STATUS "USE_FSAL_GLUSTER = ${USE_FSAL_GLUSTER}")
 message(STATUS "USE_FSAL_NULL = ${USE_FSAL_NULL}")
 message(STATUS "USE_FSAL_MEM = ${USE_FSAL_MEM}")
+message(STATUS "USE_FSAL_OFS = ${USE_FSAL_OFS}")
 message(STATUS "GSH_CAN_HOST_LOCAL_FS = ${GSH_CAN_HOST_LOCAL_FS}")
 message(STATUS "USE_SYSTEM_NTIRPC = ${USE_SYSTEM_NTIRPC}")
 message(STATUS "USE_DBUS = ${USE_DBUS}")

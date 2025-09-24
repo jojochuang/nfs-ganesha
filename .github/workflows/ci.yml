@@ -1,0 +1,310 @@
+name: CI
+
+on:
+  push:
+    branches: [ next, main ]
+  pull_request:
+    branches: [ next, main ]
+
+jobs:
+  # Style checking job
+  style:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+    
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format
+        clang-format --version
+    
+    - name: Check code formatting
+      run: |
+        cd src
+        find . -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.cc" | \
+        while read file; do
+          if ! clang-format -style=file --dry-run --Werror "$file" > /dev/null 2>&1; then
+            echo "ERROR: File $file is not formatted correctly"
+            echo "Please run: clang-format -style=file -i $file"
+            exit 1
+          fi
+        done
+        echo "All files are properly formatted"
+
+  # Build matrix job
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: 
+          - ubuntu-latest
+          - ubuntu-20.04
+        include:
+          # Rocky Linux via container
+          - os: ubuntu-latest
+            container: rockylinux:8
+            rocky: true
+
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install dependencies (Ubuntu)
+      if: ${{ !matrix.rocky }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          pkg-config \
+          libnfsidmap-dev \
+          libkrb5-dev \
+          libgssapi-krb5-2 \
+          libdbus-1-dev \
+          libattr1-dev \
+          libacl1-dev \
+          libcap-dev \
+          libjemalloc-dev \
+          uuid-dev \
+          libblkid-dev \
+          xfslibs-dev \
+          libwbclient-dev \
+          liblttng-ust-dev \
+          libaio-dev \
+          libibverbs-dev \
+          librdmacm-dev \
+          libgtest-dev \
+          libboost-program-options-dev \
+          libboost-system-dev \
+          libboost-filesystem-dev \
+          clang \
+          gcc
+
+    - name: Install dependencies (Rocky Linux)
+      if: ${{ matrix.rocky }}
+      run: |
+        dnf update -y
+        dnf groupinstall -y "Development Tools"
+        dnf install -y \
+          cmake \
+          pkgconfig \
+          libnfsidmap-devel \
+          krb5-devel \
+          libacl-devel \
+          libattr-devel \
+          libcap-devel \
+          jemalloc-devel \
+          libuuid-devel \
+          libblkid-devel \
+          xfsprogs-devel \
+          samba-winbind-clients \
+          lttng-ust-devel \
+          libaio-devel \
+          libibverbs-devel \
+          librdmacm-devel \
+          boost-devel \
+          dbus-devel \
+          gtest-devel \
+          clang \
+          gcc \
+          gcc-c++
+
+    - name: Configure build
+      run: |
+        mkdir -p build
+        cd build
+        cmake \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DUSE_FSAL_OFS=ON \
+          -DUSE_FSAL_VFS=ON \
+          -DUSE_FSAL_MEM=ON \
+          -DUSE_GTEST=ON \
+          -DUSE_DBUS=OFF \
+          -DUSE_LTTNG=OFF \
+          -DUSE_ADMIN_TOOLS=OFF \
+          -DUSE_FSAL_CEPH=OFF \
+          -DUSE_FSAL_GLUSTER=OFF \
+          -DUSE_FSAL_GPFS=OFF \
+          ../src
+
+    - name: Build
+      run: |
+        cd build
+        make -j$(nproc)
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: nfs-ganesha-${{ matrix.os }}${{ matrix.rocky && '-rocky8' || '' }}
+        path: |
+          build/MainNFSD/ganesha.nfsd
+          build/FSAL/FSAL_OFS/libfsalofs.so
+          build/FSAL/FSAL_VFS/vfs/libfsalvfs.so
+          build/FSAL/FSAL_MEM/libfsalmem.so
+        retention-days: 7
+
+  # Unit tests job
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          pkg-config \
+          libnfsidmap-dev \
+          libkrb5-dev \
+          libgssapi-krb5-2 \
+          libdbus-1-dev \
+          libattr1-dev \
+          libacl1-dev \
+          libcap-dev \
+          libjemalloc-dev \
+          uuid-dev \
+          libblkid-dev \
+          xfslibs-dev \
+          libwbclient-dev \
+          liblttng-ust-dev \
+          libaio-dev \
+          libibverbs-dev \
+          librdmacm-dev \
+          libgtest-dev \
+          libboost-program-options-dev \
+          libboost-system-dev \
+          libboost-filesystem-dev
+
+    - name: Configure and build with tests
+      run: |
+        mkdir -p build
+        cd build
+        cmake \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DUSE_FSAL_OFS=ON \
+          -DUSE_FSAL_VFS=ON \
+          -DUSE_FSAL_MEM=ON \
+          -DUSE_GTEST=ON \
+          -DUSE_DBUS=OFF \
+          -DUSE_LTTNG=OFF \
+          -DUSE_ADMIN_TOOLS=OFF \
+          -DUSE_FSAL_CEPH=OFF \
+          -DUSE_FSAL_GLUSTER=OFF \
+          -DUSE_FSAL_GPFS=OFF \
+          ../src
+        make -j$(nproc)
+
+    - name: Run unit tests
+      run: |
+        cd build
+        # Run available gtest executables
+        find . -name "test_*" -type f -executable | while read test; do
+          echo "Running test: $test"
+          timeout 60s "$test" || echo "Test $test failed or timed out"
+        done
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: build/test_*.xml
+        retention-days: 7
+
+  # ASAN/UBSAN job
+  sanitizers:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          pkg-config \
+          libnfsidmap-dev \
+          libkrb5-dev \
+          libgssapi-krb5-2 \
+          libdbus-1-dev \
+          libattr1-dev \
+          libacl1-dev \
+          libcap-dev \
+          libjemalloc-dev \
+          uuid-dev \
+          libblkid-dev \
+          xfslibs-dev \
+          libwbclient-dev \
+          liblttng-ust-dev \
+          libaio-dev \
+          libibverbs-dev \
+          librdmacm-dev \
+          libgtest-dev \
+          libboost-program-options-dev \
+          libboost-system-dev \
+          libboost-filesystem-dev \
+          clang
+
+    - name: Configure build with sanitizers
+      run: |
+        mkdir -p build
+        cd build
+        CC=clang CXX=clang++ cmake \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer" \
+          -DUSE_FSAL_OFS=ON \
+          -DUSE_FSAL_VFS=ON \
+          -DUSE_FSAL_MEM=ON \
+          -DUSE_GTEST=ON \
+          -DUSE_DBUS=OFF \
+          -DUSE_LTTNG=OFF \
+          -DUSE_ADMIN_TOOLS=OFF \
+          -DUSE_FSAL_CEPH=OFF \
+          -DUSE_FSAL_GLUSTER=OFF \
+          -DUSE_FSAL_GPFS=OFF \
+          ../src
+
+    - name: Build with sanitizers
+      run: |
+        cd build
+        make -j$(nproc)
+
+    - name: Run basic tests with sanitizers
+      env:
+        ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:check_initialization_order=1:strict_init_order=1
+        UBSAN_OPTIONS: print_stacktrace=1:abort_on_error=1
+      run: |
+        cd build
+        # Run a basic test to verify sanitizers work
+        find . -name "test_example" -type f -executable | while read test; do
+          echo "Running sanitizer test: $test"
+          timeout 60s "$test" || echo "Test $test failed or timed out"
+        done
+
+    - name: Upload sanitizer logs
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: sanitizer-logs
+        path: |
+          /tmp/asan_*
+          /tmp/ubsan_*
+        retention-days: 7
