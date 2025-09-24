@@ -367,7 +367,12 @@ fsal_status_t lookup_path(struct fsal_export *exp_hdl, const char *path,
 			  struct fsal_obj_handle **handle,
 			  struct fsal_attrlist *attrs_out)
 {
-	LogCrit(COMPONENT_FSAL, "Invoking unsupported FSAL operation");
+	LogCrit(COMPONENT_FSAL,
+		"FSAL %s (export %p) does not implement lookup_path operation for path '%s' - "
+		"this indicates a FSAL initialization bug where the export operations "
+		"were not properly set up after calling fsal_export_init()",
+		exp_hdl ? (exp_hdl->fsal ? exp_hdl->fsal->name : "NULL-FSAL") : "NULL-EXPORT",
+		exp_hdl, path ? path : "NULL-PATH");
 	return fsalstat(ERR_FSAL_NOTSUPP, ENOTSUP);
 }
 
