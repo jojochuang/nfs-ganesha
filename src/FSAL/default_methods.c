@@ -357,128 +357,18 @@ static void export_release(struct fsal_export *exp_hdl)
 	/* return */
 }
 
-/* Simple default handle structure for basic cases */
-struct default_fsal_obj_handle {
-	struct fsal_obj_handle obj_handle; /* Base handle */
-	char *path;                         /* Path to the file/directory */
-};
-
 /* lookup_path
- * Default implementation that creates a basic root handle for exports.
- * This provides a working fallback for FSALs that don't implement their own lookup_path.
+ * default case is not supported, note that with lookup_path ONLY being
+ * used to instantiate the export's root obj_handle, there can not be any
+ * useful default method.
  */
 
 fsal_status_t lookup_path(struct fsal_export *exp_hdl, const char *path,
 			  struct fsal_obj_handle **handle,
 			  struct fsal_attrlist *attrs_out)
 {
-	struct stat st;
-	int retval = 0;
-	struct fsal_filesystem *fs;
-	struct fsal_dev__ dev;
-	struct default_fsal_obj_handle *default_hdl;
-	
-	*handle = NULL;
-	
-	if (!path) {
-		LogCrit(COMPONENT_FSAL, "lookup_path called with NULL path");
-		return fsalstat(ERR_FSAL_INVAL, EINVAL);
-	}
-	
-	if (!exp_hdl) {
-		LogCrit(COMPONENT_FSAL, "lookup_path called with NULL export handle");
-		return fsalstat(ERR_FSAL_INVAL, EINVAL);
-	}
-	
-	/* Get the export path from the operation context */
-	const char *export_path = CTX_FULLPATH(op_ctx);
-	
-	/* Check if the requested path matches the export path */
-	if (export_path && strcmp(path, export_path) != 0) {
-		LogCrit(COMPONENT_FSAL,
-			"Default lookup_path: attempt to lookup non-root path %s (expected %s)",
-			path, export_path);
-		return fsalstat(ERR_FSAL_NOENT, ENOENT);
-	}
-	
-	/* Try to stat the path to verify it exists and get basic information */
-	retval = stat(path, &st);
-	if (retval != 0) {
-		retval = errno;
-		LogInfo(COMPONENT_FSAL,
-			"Default lookup_path: stat failed for path %s: %s",
-			path, strerror(retval));
-		return posix2fsal_status(retval);
-	}
-	
-	/* Check if it's a directory (required for export root) */
-	if (!S_ISDIR(st.st_mode)) {
-		LogCrit(COMPONENT_FSAL,
-			"Default lookup_path: path %s is not a directory", path);
-		return fsalstat(ERR_FSAL_NOTDIR, ENOTDIR);
-	}
-	
-	/* Try to find the filesystem */
-	dev = posix2fsal_devt(st.st_dev);
-	fs = lookup_dev(&dev);
-	
-	if (fs == NULL) {
-		LogInfo(COMPONENT_FSAL,
-			"Default lookup_path: could not find filesystem for path %s", path);
-		return fsalstat(ERR_FSAL_NOENT, ENOENT);
-	}
-	
-	if (fs->fsal != exp_hdl->fsal) {
-		LogInfo(COMPONENT_FSAL,
-			"Default lookup_path: filesystem for path %s does not belong to FSAL %s",
-			path, exp_hdl->fsal ? exp_hdl->fsal->name : "NULL");
-		return fsalstat(ERR_FSAL_XDEV, EXDEV);
-	}
-	
-	/* Allocate a default handle structure */
-	default_hdl = gsh_malloc(sizeof(struct default_fsal_obj_handle));
-	if (!default_hdl) {
-		LogCrit(COMPONENT_FSAL, "Failed to allocate default handle");
-		return fsalstat(ERR_FSAL_NOMEM, ENOMEM);
-	}
-	
-	/* Store the path */
-	default_hdl->path = gsh_strdup(path);
-	if (!default_hdl->path) {
-		gsh_free(default_hdl);
-		LogCrit(COMPONENT_FSAL, "Failed to allocate path string");
-		return fsalstat(ERR_FSAL_NOMEM, ENOMEM);
-	}
-	
-	/* Initialize the base handle structure */
-	fsal_obj_handle_init(&default_hdl->obj_handle, exp_hdl, DIRECTORY, true);
-	
-	/* Set up default operations */
-	fsal_default_obj_ops_init(&default_hdl->obj_handle.obj_ops);
-	
-	/* Set up basic handle attributes */
-	default_hdl->obj_handle.fs = fs;
-	default_hdl->obj_handle.fsid = posix2fsal_fsid(st.st_dev);
-	default_hdl->obj_handle.fileid = st.st_ino;
-	
-	/* Set attributes if requested */
-	if (attrs_out != NULL) {
-		fsal_prepare_attrs(attrs_out, ATTR_MODE | ATTR_SIZE | ATTR_FILEID |
-				   ATTR_TYPE | ATTR_FSID | ATTR_MTIME | ATTR_CTIME | ATTR_ATIME);
-		
-		posix2fsal_attributes_all(&st, attrs_out);
-		
-		/* Ensure the filesystem ID is set correctly */
-		attrs_out->fsid = default_hdl->obj_handle.fsid;
-	}
-	
-	*handle = &default_hdl->obj_handle;
-	
-	LogDebug(COMPONENT_FSAL,
-		 "Default lookup_path: created handle %p for FSAL %s path %s",
-		 *handle, exp_hdl->fsal ? exp_hdl->fsal->name : "NULL", path);
-	
-	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+	LogCrit(COMPONENT_FSAL, "Invoking unsupported FSAL operation");
+	return fsalstat(ERR_FSAL_NOTSUPP, ENOTSUP);
 }
 
 static fsal_status_t lookup_junction(struct fsal_export *exp_hdl,
