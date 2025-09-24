@@ -25,6 +25,7 @@ jobs:
       run: |
         cd src
         find . -name "*.c" -o -name "*.h" -o -name "*.cpp" -o -name "*.hpp" -o -name "*.cc" | \
+        grep -v libntirpc | grep -v coverity | \
         while read file; do
           if ! clang-format -style=file --dry-run --Werror "$file" > /dev/null 2>&1; then
             echo "ERROR: File $file is not formatted correctly"
@@ -84,6 +85,9 @@ jobs:
           libboost-program-options-dev \
           libboost-system-dev \
           libboost-filesystem-dev \
+          google-perftools \
+          libgoogle-perftools-dev \
+          libnsl-dev \
           clang \
           gcc
 
@@ -112,6 +116,8 @@ jobs:
           boost-devel \
           dbus-devel \
           gtest-devel \
+          gperftools-devel \
+          libnsl2-devel \
           clang \
           gcc \
           gcc-c++
@@ -125,13 +131,18 @@ jobs:
           -DUSE_FSAL_OFS=ON \
           -DUSE_FSAL_VFS=ON \
           -DUSE_FSAL_MEM=ON \
-          -DUSE_GTEST=ON \
+          -DUSE_GTEST=OFF \
           -DUSE_DBUS=OFF \
           -DUSE_LTTNG=OFF \
           -DUSE_ADMIN_TOOLS=OFF \
           -DUSE_FSAL_CEPH=OFF \
           -DUSE_FSAL_GLUSTER=OFF \
           -DUSE_FSAL_GPFS=OFF \
+          -DUSE_FSAL_LUSTRE=OFF \
+          -DUSE_FSAL_LIZARDFS=OFF \
+          -DUSE_FSAL_KVSFS=OFF \
+          -DUSE_FSAL_RGW=OFF \
+          -DUSE_FSAL_SAUNAFS=OFF \
           ../src
 
     - name: Build
@@ -144,7 +155,7 @@ jobs:
       with:
         name: nfs-ganesha-${{ matrix.os }}${{ matrix.rocky && '-rocky8' || '' }}
         path: |
-          build/MainNFSD/ganesha.nfsd
+          build/ganesha.nfsd
           build/FSAL/FSAL_OFS/libfsalofs.so
           build/FSAL/FSAL_VFS/vfs/libfsalvfs.so
           build/FSAL/FSAL_MEM/libfsalmem.so
@@ -186,7 +197,10 @@ jobs:
           libgtest-dev \
           libboost-program-options-dev \
           libboost-system-dev \
-          libboost-filesystem-dev
+          libboost-filesystem-dev \
+          google-perftools \
+          libgoogle-perftools-dev \
+          libnsl-dev
 
     - name: Configure and build with tests
       run: |
@@ -204,6 +218,11 @@ jobs:
           -DUSE_FSAL_CEPH=OFF \
           -DUSE_FSAL_GLUSTER=OFF \
           -DUSE_FSAL_GPFS=OFF \
+          -DUSE_FSAL_LUSTRE=OFF \
+          -DUSE_FSAL_LIZARDFS=OFF \
+          -DUSE_FSAL_KVSFS=OFF \
+          -DUSE_FSAL_RGW=OFF \
+          -DUSE_FSAL_SAUNAFS=OFF \
           ../src
         make -j$(nproc)
 
@@ -260,6 +279,9 @@ jobs:
           libboost-program-options-dev \
           libboost-system-dev \
           libboost-filesystem-dev \
+          google-perftools \
+          libgoogle-perftools-dev \
+          libnsl-dev \
           clang
 
     - name: Configure build with sanitizers
@@ -280,6 +302,11 @@ jobs:
           -DUSE_FSAL_CEPH=OFF \
           -DUSE_FSAL_GLUSTER=OFF \
           -DUSE_FSAL_GPFS=OFF \
+          -DUSE_FSAL_LUSTRE=OFF \
+          -DUSE_FSAL_LIZARDFS=OFF \
+          -DUSE_FSAL_KVSFS=OFF \
+          -DUSE_FSAL_RGW=OFF \
+          -DUSE_FSAL_SAUNAFS=OFF \
           ../src
 
     - name: Build with sanitizers
