@@ -35,11 +35,47 @@ make
 
 ## Configuration
 
-To use the OFS FSAL in your ganesha configuration:
+The OFS FSAL supports comprehensive configuration through an `OFS` block in ganesha.conf:
 
 ```
-FSAL {
-    Name = OFS;
+OFS {
+    # Ozone URI specifying default volume and bucket
+    OzoneURI = "ozone://localhost:9862/vol1/bucket1";
+    
+    # Whitelist of allowed volumes (comma-separated)
+    VolumeWhitelist = "vol1, vol2, vol3";
+    
+    # Directory for staging files during operations
+    StagingDir = "/var/cache/nfs-ganesha-ofs";
+    
+    # Maximum bytes to use for staging (1GB default)
+    MaxStagingBytes = 1073741824;
+    
+    # Read-ahead buffer size in KB (1MB default)
+    ReadAheadKB = 1024;
+}
+```
+
+### Configuration Parameters
+
+- **OzoneURI**: Optional. Format `[ozone://host:port/]volume/bucket`. Specifies default Ozone service and container.
+- **VolumeWhitelist**: Optional. Comma-separated list of allowed volumes. If not set, all volumes are accessible.
+- **StagingDir**: Optional. Directory for temporary file staging. Default: `/tmp/nfs-ganesha-ofs`
+- **MaxStagingBytes**: Optional. Maximum staging space in bytes. Default: 1GB
+- **ReadAheadKB**: Optional. Read-ahead buffer size in KB. Default: 1MB
+
+The configuration parser validates all parameters and fails fast with clear error messages for invalid configs. Effective configuration is logged at INFO level on startup.
+
+To use the OFS FSAL in an export:
+
+```
+EXPORT {
+    Export_Id = 101;
+    Path = "/ozone";
+    Pseudo = "/ozone";
+    FSAL {
+        Name = "OFS";
+    }
 }
 ```
 
@@ -50,10 +86,20 @@ FSAL {
 This skeleton provides the foundation for implementing a complete OFS FSAL. Key areas for development:
 
 1. ✅ Export creation and management - **IMPLEMENTED** 
-2. File and directory operations
-3. Handle management
-4. Configuration parameter handling
+2. ✅ Configuration parameter handling - **IMPLEMENTED**
+3. File and directory operations
+4. Handle management
 5. Object store integration
+
+### Configuration System
+
+The OFS FSAL now includes a complete configuration system:
+
+- `struct ofs_conf` - Configuration parameter structure  
+- Configuration parsing and validation with proper error handling
+- Support for OzoneURI, VolumeWhitelist, StagingDir, MaxStagingBytes, ReadAheadKB
+- Comprehensive unit tests for configuration parsing
+- Configuration logging at INFO level on startup
 
 ## Current Implementation
 
@@ -72,7 +118,7 @@ The OFS FSAL now implements basic export creation functionality:
 - `fsal_ofs_internal.h` - Internal data structures and prototypes
 - `fsal_ofs_ops.c` - File operations (stub implementations)  
 - `fsal_ofs_handle.c` - Handle operations (stub implementations)
-- `fsal_ofs_conf.c` - Configuration handling (stub implementations)
+- `fsal_ofs_conf.c` - Configuration handling (**IMPLEMENTED**)
 - `fsal_ofs_util.c` - Utility functions (stub implementations)
 - `CMakeLists.txt` - Build configuration
 

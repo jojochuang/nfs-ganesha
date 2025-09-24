@@ -33,6 +33,17 @@ struct ozone_bucket;
 struct ozone_key;
 
 /**
+ * @brief OFS FSAL configuration parameters
+ */
+struct ofs_conf {
+	char *ozone_uri;		/* OzoneURI (default-volume, default-bucket) */
+	char *volume_whitelist;		/* VolumeWhitelist */
+	char *staging_dir;		/* StagingDir */
+	uint64_t max_staging_bytes;	/* MaxStagingBytes */
+	uint32_t read_ahead_kb;		/* ReadAheadKB */
+};
+
+/**
  * OFS internal export
  */
 struct ofs_fsal_export {
@@ -57,6 +68,12 @@ void ofs_export_ops_init(struct export_ops *ops);
 fsal_status_t ofs_create_export(struct fsal_module *fsal_hdl, void *parse_node,
 				struct config_error_type *err_type,
 				const struct fsal_up_vector *up_ops);
+
+/* Configuration function prototypes */
+struct config_error_type;
+int ofs_parse_ozone_uri(const char *ozone_uri, char **volume_name, 
+			char **bucket_name, char **service_uri);
+bool ofs_volume_is_whitelisted(const char *volume_name, const char *volume_whitelist);
 
 /* Ozone client API wrapper functions (to be implemented) */
 int ofs_ozone_connect(const char *service_id, struct ozone_client **client);
