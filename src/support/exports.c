@@ -3130,9 +3130,8 @@ int init_export_root(struct gsh_export *export)
 
 	/* Lookup for the FSAL Path */
 	LogDebug(COMPONENT_EXPORT,
-		 "About to lookup_path for ExportId=%u Path=%s FSAL=%s",
-		 export->export_id, CTX_FULLPATH(op_ctx),
-		 export->fsal_export->fsal ? export->fsal_export->fsal->name : "NULL");
+		 "About to lookup_path for ExportId=%u Path=%s",
+		 export->export_id, CTX_FULLPATH(op_ctx));
 
 	/* This takes a reference, which will keep the root object around for
 	 * the lifetime of the export. */
@@ -3143,9 +3142,8 @@ int init_export_root(struct gsh_export *export)
 		my_status = EINVAL;
 
 		LogCrit(COMPONENT_EXPORT,
-			"Lookup failed on path, ExportId=%u Path=%s FSAL=%s FSAL_ERROR=(%s,%u)",
+			"Lookup failed on path, ExportId=%u Path=%s FSAL_ERROR=(%s,%u)",
 			export->export_id, CTX_FULLPATH(op_ctx),
-			export->fsal_export->fsal ? export->fsal_export->fsal->name : "NULL",
 			msg_fsal_err(fsal_status.major), fsal_status.minor);
 		goto out;
 	}
