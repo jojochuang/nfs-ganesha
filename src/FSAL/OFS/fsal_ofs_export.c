@@ -30,6 +30,7 @@
 #include "fsal.h"
 #include "FSAL/fsal_commonlib.h"
 #include "FSAL/fsal_config.h"
+#include "config_parsing.h"
 #include "fsal_ofs_internal.h"
 #include "nfs_exports.h"
 #include "export_mgr.h"
