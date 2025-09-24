@@ -30,6 +30,7 @@ set( LIB_PREFIX 64)
 
 SET(fsalofs_LIB_SRCS
    fsal_ofs_init.c
+   fsal_ofs_export.c
    fsal_ofs_ops.c
    fsal_ofs_handle.c
    fsal_ofs_conf.c

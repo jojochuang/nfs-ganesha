@@ -35,8 +35,14 @@
 #include <limits.h>
 #include <sys/types.h>
 #include "FSAL/fsal_init.h"
+#include "FSAL/fsal_commonlib.h"
+#include "FSAL/fsal_config.h"
 #include "fsal_convert.h"
+#include "config_parsing.h"
 #include "../fsal_private.h"
+#include "fsal_ofs_internal.h"
+#include "nfs_exports.h"
+#include "export_mgr.h"
 
 /* OFS FSAL module private storage */
 
@@ -102,24 +108,80 @@ static fsal_status_t ofs_init_config(struct fsal_module *fsal_hdl,
 	return fsalstat(ERR_FSAL_NO_ERROR, 0);
 }
 
+/* Configuration parameters for OFS export */
+static struct config_item ofs_export_params[] = {
+	CONF_ITEM_NOOP("name"),
+	CONFIG_EOL
+};
+
+static struct config_block ofs_export_param_block = {
+	.dbus_interface_name = "org.ganesha.nfsd.config.fsal.ofs-export%d",
+	.blk_desc.name = "FSAL",
+	.blk_desc.type = CONFIG_BLOCK,
+	.blk_desc.u.blk.init = noop_conf_init,
+	.blk_desc.u.blk.params = ofs_export_params,
+	.blk_desc.u.blk.commit = noop_conf_commit
+};
+
 /**
  * @brief OFS FSAL export creation
  *
  * @param[in] fsal_hdl     FSAL module handle  
- * @param[in] path         Export path
- * @param[in] fs_options   Filesystem options
- * @param[out] export_hdl  Export handle
- * @param[in] attrs_out    Export attributes
+ * @param[in] parse_node   Configuration parse node
+ * @param[out] err_type    Error information
+ * @param[in] up_ops       Upcall operations
  *
  * @return FSAL status
  */
-static fsal_status_t ofs_create_export(struct fsal_module *fsal_hdl,
-					void *parse_node,
-					struct config_error_type *err_type,
-					const struct fsal_up_vector *up_ops)
+fsal_status_t ofs_create_export(struct fsal_module *fsal_hdl,
+				void *parse_node,
+				struct config_error_type *err_type,
+				const struct fsal_up_vector *up_ops)
 {
-	LogDebug(COMPONENT_FSAL, "OFS create_export called - not implemented.");
-	return fsalstat(ERR_FSAL_NOTSUPP, 0);
+	struct ofs_fsal_export *myself;
+	int retval = 0;
+	fsal_status_t fsal_status = { 0, 0 };
+
+	LogDebug(COMPONENT_FSAL, "OFS create_export called");
+
+	myself = gsh_calloc(1, sizeof(struct ofs_fsal_export));
+
+	fsal_export_init(&myself->export);
+	ofs_export_ops_init(&myself->export.exp_ops);
+
+	retval = load_config_from_node(parse_node, &ofs_export_param_block,
+				       myself, true, err_type);
+	if (retval != 0) {
+		LogMajor(COMPONENT_FSAL, 
+			 "OFS export config error, code %d", retval);
+		fsal_status = posix2fsal_status(EINVAL);
+		goto err_free;
+	}
+
+	myself->export.fsal = fsal_hdl;
+
+	retval = fsal_attach_export(fsal_hdl, &myself->export.exports);
+	if (retval != 0) {
+		LogMajor(COMPONENT_FSAL, "Could not attach OFS export");
+		fsal_status = posix2fsal_status(retval);
+		goto err_free;
+	}
+
+	myself->export.up_ops = up_ops;
+
+	/* Save the export path */
+	myself->export_path = gsh_strdup(CTX_FULLPATH(op_ctx));
+	op_ctx->fsal_export = &myself->export;
+
+	LogInfo(COMPONENT_FSAL, "Created OFS export for %s",
+		myself->export_path);
+
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+
+err_free:
+	free_export_ops(&myself->export);
+	gsh_free(myself);
+	return fsal_status;
 }
 
 /**
