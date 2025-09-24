@@ -26,12 +26,30 @@
 
 #include "fsal.h"
 
+/* Forward declarations for Ozone client types */
+struct ozone_client;
+struct ozone_volume;
+struct ozone_bucket;
+struct ozone_key;
+
 /**
  * OFS internal export
  */
 struct ofs_fsal_export {
 	struct fsal_export export;	/* Export this wraps */
 	char *export_path;		/* The path for this export */
+	struct ozone_client *client;	/* Ozone client connection */
+	char *volume_name;		/* Ozone volume name */
+	char *bucket_name;		/* Ozone bucket name */
+};
+
+/**
+ * OFS internal object handle
+ */
+struct ofs_fsal_obj_handle {
+	struct fsal_obj_handle obj_handle; /* Base handle */
+	char *key_name;			   /* Ozone key name */
+	struct ofs_fsal_export *export;   /* Back pointer to export */
 };
 
 /* Function prototypes */
@@ -39,3 +57,13 @@ void ofs_export_ops_init(struct export_ops *ops);
 fsal_status_t ofs_create_export(struct fsal_module *fsal_hdl, void *parse_node,
 				struct config_error_type *err_type,
 				const struct fsal_up_vector *up_ops);
+
+/* Ozone client API wrapper functions (to be implemented) */
+int ofs_ozone_connect(const char *service_id, struct ozone_client **client);
+int ofs_ozone_get_volume(struct ozone_client *client, const char *volume_name, 
+			 struct ozone_volume **volume);
+int ofs_ozone_get_bucket(struct ozone_volume *volume, const char *bucket_name,
+			 struct ozone_bucket **bucket);
+int ofs_ozone_head_key(struct ozone_bucket *bucket, const char *key_name,
+		       struct ozone_key **key);
+void ofs_ozone_disconnect(struct ozone_client *client);

@@ -173,10 +173,34 @@ fsal_status_t ofs_create_export(struct fsal_module *fsal_hdl,
 	myself->export_path = gsh_strdup(CTX_FULLPATH(op_ctx));
 	op_ctx->fsal_export = &myself->export;
 
-	LogInfo(COMPONENT_FSAL, "Created OFS export for %s",
-		myself->export_path);
+	/* Initialize Ozone client connection */
+	/* TODO: These should come from configuration parameters */
+	myself->volume_name = gsh_strdup("default-volume");
+	myself->bucket_name = gsh_strdup("default-bucket");
+	
+	/* Connect to Ozone service */
+	/* TODO: Service ID should come from configuration */
+	retval = ofs_ozone_connect("ozone://localhost:9862", &myself->client);
+	if (retval != 0) {
+		LogCrit(COMPONENT_FSAL, 
+			"OFS: Failed to connect to Ozone service: %d", retval);
+		fsal_status = posix2fsal_status(EIO);
+		goto err_cleanup;
+	}
+
+	LogInfo(COMPONENT_FSAL, "Created OFS export for %s (volume: %s, bucket: %s)",
+		myself->export_path, myself->volume_name, myself->bucket_name);
 
 	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+
+err_cleanup:
+	if (myself->export_path)
+		gsh_free(myself->export_path);
+	if (myself->volume_name)
+		gsh_free(myself->volume_name);
+	if (myself->bucket_name)
+		gsh_free(myself->bucket_name);
+	fsal_detach_export(fsal_hdl, &myself->export.exports);
 
 err_free:
 	free_export_ops(&myself->export);
