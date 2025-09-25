@@ -24,6 +24,30 @@
 
 /* fsal_ofs_handle.c
  * OFS FSAL handle operations
+ *
+ * This file implements file handle encoding/decoding for the OFS FSAL.
+ * 
+ * KEY FEATURES:
+ * - Stable file handles that survive renames (object_id constant)
+ * - CRC32C integrity checking with export-id salt  
+ * - 28-byte wire format suitable for NFSv3/v4
+ * - Cross-export handle rejection
+ * - Version field for future format evolution
+ *
+ * HANDLE FORMAT (struct ofs_fh):
+ * - version (8-bit): Format version (currently 0x01)
+ * - flags (8-bit): Object type and other flags
+ * - export_id (16-bit): Export identifier for validation
+ * - volume_id (32-bit): Ozone volume identifier (hashed)
+ * - bucket_id (32-bit): Ozone bucket identifier (hashed)
+ * - object_id (64-bit): Stable object identifier (constant across renames)  
+ * - generation (32-bit): Object generation counter
+ * - checksum (32-bit): CRC32C integrity check
+ *
+ * SECURITY:
+ * - Invalid checksum returns NFS4ERR_BADHANDLE
+ * - Export ID prevents cross-export handle reuse
+ * - CRC32C detects corruption and tampering
  */
 
 #include "config.h"
