@@ -26,6 +26,45 @@ add_definitions(
 
 set( LIB_PREFIX 64)
 
+# Optional libhdfs support for real Ozone implementation
+option(USE_LIBHDFS "Enable libhdfs support for Ozone integration" OFF)
+
+if(USE_LIBHDFS)
+  find_path(HDFS_INCLUDE_DIR hdfs.h
+    HINTS 
+      ENV HADOOP_HOME
+      ENV JAVA_HOME
+    PATH_SUFFIXES 
+      include
+      hadoop/include
+      include/hdfs
+      share/hadoop/common/lib/native/include
+  )
+  
+  find_library(HDFS_LIBRARY
+    NAMES hdfs libhdfs
+    HINTS
+      ENV HADOOP_HOME
+      ENV JAVA_HOME
+    PATH_SUFFIXES 
+      lib
+      lib/native
+      hadoop/lib/native
+      share/hadoop/common/lib/native
+  )
+  
+  if(HDFS_INCLUDE_DIR AND HDFS_LIBRARY)
+    message(STATUS "Found libhdfs: ${HDFS_LIBRARY}")
+    message(STATUS "Found hdfs.h: ${HDFS_INCLUDE_DIR}")
+    add_definitions(-DUSE_LIBHDFS)
+    set(HDFS_FOUND TRUE)
+  else()
+    message(WARNING "libhdfs requested but not found. Falling back to mock implementation.")
+    message(STATUS "  Set HADOOP_HOME or provide -DHDFS_INCLUDE_DIR and -DHDFS_LIBRARY")
+    set(HDFS_FOUND FALSE)
+  endif()
+endif(USE_LIBHDFS)
+
 ########### next target ###############
 
 SET(fsalofs_LIB_SRCS
@@ -39,6 +78,12 @@ SET(fsalofs_LIB_SRCS
 
 add_library(fsalofs MODULE ${fsalofs_LIB_SRCS})
 add_sanitizers(fsalofs)
+
+# Add hdfs include directory and library if available
+if(HDFS_FOUND)
+  target_include_directories(fsalofs PRIVATE ${HDFS_INCLUDE_DIR})
+  target_link_libraries(fsalofs ${HDFS_LIBRARY})
+endif()
 
 target_link_libraries(fsalofs
   ganesha_nfsd
