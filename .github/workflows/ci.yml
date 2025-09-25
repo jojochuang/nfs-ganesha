@@ -13,7 +13,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: 'recursive'
+        submodules: recursive
+        fetch-depth: 0
     
     - name: Install clang-format
       run: |
@@ -55,7 +56,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: 'recursive'
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Install dependencies (Ubuntu)
       if: ${{ !matrix.rocky }}
@@ -97,6 +99,7 @@ jobs:
         dnf update -y
         dnf groupinstall -y "Development Tools"
         dnf install -y \
+          git \
           cmake \
           pkgconfig \
           libnfsidmap-devel \
@@ -169,7 +172,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: 'recursive'
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |
@@ -250,7 +254,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: 'recursive'
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Install dependencies
       run: |
