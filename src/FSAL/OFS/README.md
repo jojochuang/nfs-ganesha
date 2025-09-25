@@ -26,35 +26,22 @@ This is a **skeleton implementation** that provides:
 
 ## Build Instructions
 
-To build with OFS FSAL support:
+To build with OFS FSAL support, libhdfs is required:
 
 ```bash
+# Install Hadoop/libhdfs first (see prerequisites below)
 cmake -DUSE_FSAL_OFS=ON <source_directory>
 make
 ```
 
-### Building with Real Ozone/libhdfs Support
+#### Prerequisites for Ozone Support
 
-The OFS FSAL supports two modes of operation:
-
-1. **Mock Mode** (default) - Uses stub implementations for testing and development
-2. **Real Mode** - Uses Apache Hadoop libhdfs to connect to Apache Ozone clusters
-
-To build with real Ozone support via libhdfs:
-
-```bash
-# Install Hadoop/libhdfs first (see prerequisites below)
-cmake -DUSE_FSAL_OFS=ON -DUSE_LIBHDFS=ON <source_directory>
-make
-```
-
-#### Prerequisites for Real Ozone Support
-
-To use the real Ozone implementation, you need:
+The OFS FSAL requires:
 
 1. **Apache Hadoop** with native libraries installed
-2. **Java Development Kit (JDK)** 8 or later
+2. **Java Development Kit (JDK)** 8 or later  
 3. **libhdfs** native library
+4. **Apache Ozone** cluster or service
 
 Example installation on Ubuntu/Debian:
 ```bash
@@ -71,6 +58,127 @@ export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 ```
 
+The build system will detect libhdfs if:
+- `HADOOP_HOME` environment variable points to your Hadoop installation
+- OR you manually specify: `-DHDFS_INCLUDE_DIR=/path/to/hdfs/include -DHDFS_LIBRARY=/path/to/libhdfs.so`
+
+If libhdfs is not found, the build will fail with an error message.
+
+### Ozone Configuration
+
+The OFS FSAL requires proper Ozone configuration to connect to your Ozone cluster.
+
+#### Environment Variables
+
+Set the following environment variables:
+
+```bash
+# Point to directory containing ozone-site.xml
+export OZONE_CONF_DIR=/path/to/ozone/etc/ozone
+
+# Hadoop configuration directory (if different)
+export HADOOP_CONF_DIR=/path/to/hadoop/etc/hadoop
+```
+
+#### ozone-site.xml Configuration
+
+Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settings:
+
+```xml
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+  <!-- Ozone Manager (OM) service address -->
+  <property>
+    <name>ozone.om.address</name>
+    <value>ozone-om.example.com:9862</value>
+    <description>Ozone Manager RPC address</description>
+  </property>
+
+  <!-- Storage Container Manager (SCM) address -->  
+  <property>
+    <name>ozone.scm.names</name>
+    <value>ozone-scm.example.com:9860</value>
+    <description>Storage Container Manager addresses</description>
+  </property>
+
+  <!-- Enable o3fs filesystem -->
+  <property>
+    <name>fs.o3fs.impl</name>
+    <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
+  </property>
+
+  <!-- Default filesystem (optional) -->
+  <property>
+    <name>fs.defaultFS</name>
+    <value>o3fs://bucket.volume.ozone-om.example.com</value>
+  </property>
+
+  <!-- Ozone client settings -->
+  <property>
+    <name>ozone.client.retry.max.attempts</name>
+    <value>10</value>
+  </property>
+
+  <property>
+    <name>ozone.client.connection.timeout</name>
+    <value>30000</value>
+  </property>
+</configuration>
+```
+
+#### Sample Configurations
+
+**Minimal ozone-site.xml for development:**
+```xml
+<?xml version="1.0"?>
+<configuration>
+  <property>
+    <name>ozone.om.address</name>
+    <value>localhost:9862</value>
+  </property>
+  <property>
+    <name>ozone.scm.names</name>
+    <value>localhost:9860</value>
+  </property>
+  <property>
+    <name>fs.o3fs.impl</name>
+    <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
+  </property>
+</configuration>
+```
+
+**Production cluster ozone-site.xml:**
+```xml
+<?xml version="1.0"?>
+<configuration>
+  <property>
+    <name>ozone.om.address</name>
+    <value>om1.cluster.com:9862</value>
+  </property>
+  <property>
+    <name>ozone.scm.names</name>
+    <value>scm1.cluster.com:9860,scm2.cluster.com:9860,scm3.cluster.com:9860</value>
+  </property>
+  <property>
+    <name>fs.o3fs.impl</name>
+    <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
+  </property>
+  <property>
+    <name>ozone.security.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hadoop.security.authentication</name>
+    <value>kerberos</value>
+  </property>
+</configuration>
+```
+
+For complete configuration options, see the [Apache Ozone documentation](https://ozone.apache.org/docs/edge/start/quickstart.html).
+export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
+```
+
 The build system will automatically detect libhdfs if:
 - `HADOOP_HOME` environment variable points to your Hadoop installation
 - OR you manually specify: `-DHDFS_INCLUDE_DIR=/path/to/hdfs/include -DHDFS_LIBRARY=/path/to/libhdfs.so`
@@ -78,6 +186,17 @@ The build system will automatically detect libhdfs if:
 If libhdfs is not found, the build will automatically fall back to mock mode with a warning.
 
 ## Configuration
+
+The OFS FSAL requires both NFS-Ganesha configuration and Ozone cluster configuration.
+
+### Prerequisites
+
+**Before configuring NFS-Ganesha**, ensure:
+1. `OZONE_CONF_DIR` environment variable is set to directory containing `ozone-site.xml`
+2. `ozone-site.xml` contains proper Ozone cluster settings (see Ozone Configuration section above)
+3. Ozone cluster is accessible and running
+
+### NFS-Ganesha Configuration
 
 The OFS FSAL supports comprehensive configuration through an `OFS` block in ganesha.conf:
 
@@ -139,15 +258,14 @@ This implementation provides a solid foundation for a complete OFS FSAL with rea
 ### Ozone Client API
 
 The core Ozone client is now fully implemented with:
-- Real libhdfs-based implementation for production Ozone clusters
-- Mock fallback for development without Hadoop dependencies
+- libhdfs-based implementation for production Ozone clusters
 - Proper connection management and error handling
 - Metadata extraction using hdfsGetPathInfo
 - Support for o3fs:// URI scheme
 
 ### Implementation Notes
 
-The real Ozone implementation uses:
+The Ozone implementation uses:
 - **libhdfs** C API as the underlying transport
 - **o3fs** (Ozone FileSystem) scheme for path construction
 - **hdfsGetPathInfo** for metadata operations (stat/head)
@@ -172,7 +290,7 @@ The OFS FSAL now includes a complete configuration system:
 
 ### Ozone Client API
 
-The OFS FSAL now implements a complete Ozone client API with both mock and real modes:
+The OFS FSAL implements a complete Ozone client API using libhdfs:
 
 #### Functions Implemented:
 - ✅ `ofs_ozone_connect()` - Connect to Ozone service via libhdfs/o3fs
@@ -181,17 +299,13 @@ The OFS FSAL now implements a complete Ozone client API with both mock and real 
 - ✅ `ofs_ozone_head_key()` - Head (stat) operation using hdfsGetPathInfo
 - ✅ `ofs_ozone_disconnect()` - Proper cleanup of HDFS connections
 
-#### Real Implementation (libhdfs mode):
+#### Implementation Details:
 - Uses Apache Hadoop's libhdfs C API to connect to Ozone clusters
 - Constructs o3fs:// URIs (e.g., `o3fs://bucket.volume.service/path`) 
 - Maps Ozone operations to HDFS filesystem operations
 - Supports metadata extraction (size, mtime, mode, replication, block size)
 - Proper error handling and connection management
-
-#### Mock Implementation (fallback mode):
-- Provides compatible API for testing without libhdfs dependency
-- Simulates basic file/directory operations for development
-- Returns realistic metadata for test files and root directory
+- Requires proper ozone-site.xml configuration
 
 ### Configuration Integration
 
@@ -217,7 +331,7 @@ The OFS FSAL now implements basic export creation functionality:
 - `fsal_ofs_handle.c` - Handle operations (stub implementations)
 - `fsal_ofs_conf.c` - Configuration handling (**IMPLEMENTED**)
 - `fsal_ofs_util.c` - **Ozone client API with libhdfs integration** (**IMPLEMENTED**)
-- `CMakeLists.txt` - Build configuration with libhdfs detection
+- `CMakeLists.txt` - Build configuration with required libhdfs detection
 
 ## License
 

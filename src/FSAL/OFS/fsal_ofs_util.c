@@ -37,17 +37,9 @@
 #include <unistd.h>
 #include <errno.h>
 
-/* Check for libhdfs availability - can be enabled via cmake -DUSE_LIBHDFS=ON */
-#ifdef USE_LIBHDFS
+/* libhdfs is required for OFS FSAL */
 #include <hdfs.h>
-/* When libhdfs is available, we use real Hadoop/Ozone structures */
-#define OZONE_REAL_IMPLEMENTATION 1
-#else
-/* Fallback to mock implementation when libhdfs is not available */
-#define OZONE_REAL_IMPLEMENTATION 0
-#endif
 
-#if OZONE_REAL_IMPLEMENTATION
 /* Real implementation using libhdfs for Ozone */
 
 /**
@@ -85,35 +77,6 @@ struct ozone_key {
 	short replication;		/* Replication factor */
 	tOffset block_size;		/* Block size */
 };
-
-#else
-/* Mock implementation when libhdfs is not available */
-struct ozone_client {
-	char *service_uri;
-	bool connected;
-};
-
-struct ozone_volume {
-	struct ozone_client *client;
-	char *name;
-};
-
-struct ozone_bucket {
-	struct ozone_volume *volume;
-	char *name;
-};
-
-struct ozone_key {
-	struct ozone_bucket *bucket;
-	char *name;
-	size_t size;
-	time_t mtime;
-	mode_t mode;
-	uid_t uid;
-	gid_t gid;
-};
-
-#endif /* OZONE_REAL_IMPLEMENTATION */
 
 /**
  * @brief Parse OzoneURI into components
@@ -275,8 +238,6 @@ int ofs_ozone_connect(const char *service_id, struct ozone_client **client)
 		return -ENOMEM;
 	}
 
-#if OZONE_REAL_IMPLEMENTATION
-	/* Real libhdfs implementation for Ozone */
 	/* 
 	 * Connect to Ozone via o3fs (Ozone FileSystem)
 	 * o3fs URIs are of the form: o3fs://bucket.volume.service_id/path
@@ -347,11 +308,6 @@ int ofs_ozone_connect(const char *service_id, struct ozone_client **client)
 	new_client->connected = true;
 	
 	LogInfo(COMPONENT_FSAL, "OFS: Successfully connected to Ozone service via libhdfs");
-#else
-	/* Mock implementation when libhdfs is not available */
-	new_client->connected = true;
-	LogInfo(COMPONENT_FSAL, "OFS: Successfully connected to Ozone service (mock mode)");
-#endif
 
 	*client = new_client;
 	return 0;
@@ -393,7 +349,6 @@ int ofs_ozone_get_volume(struct ozone_client *client, const char *volume_name,
 		return -ENOMEM;
 	}
 
-#if OZONE_REAL_IMPLEMENTATION
 	/* 
 	 * In Ozone with libhdfs, volumes are logical groupings.
 	 * The o3fs path for a volume is: o3fs://bucket.volume.service/path
@@ -419,7 +374,6 @@ int ofs_ozone_get_volume(struct ozone_client *client, const char *volume_name,
 	
 	LogDebug(COMPONENT_FSAL, "OFS: Volume %s mapped to o3fs path: %s", 
 	         volume_name, new_volume->o3fs_path);
-#endif
 
 	*volume = new_volume;
 	LogDebug(COMPONENT_FSAL, "OFS: Successfully retrieved volume: %s", volume_name);
@@ -458,7 +412,6 @@ int ofs_ozone_get_bucket(struct ozone_volume *volume, const char *bucket_name,
 		return -ENOMEM;
 	}
 
-#if OZONE_REAL_IMPLEMENTATION
 	/* 
 	 * Construct the o3fs path for this bucket.
 	 * O3FS paths are: o3fs://bucket.volume.service/path
@@ -491,7 +444,6 @@ int ofs_ozone_get_bucket(struct ozone_volume *volume, const char *bucket_name,
 	
 	LogDebug(COMPONENT_FSAL, "OFS: Bucket %s mapped to o3fs path: %s", 
 	         bucket_name, new_bucket->o3fs_path);
-#endif
 
 	*bucket = new_bucket;
 	LogDebug(COMPONENT_FSAL, "OFS: Successfully retrieved bucket: %s", bucket_name);
@@ -530,7 +482,6 @@ int ofs_ozone_head_key(struct ozone_bucket *bucket, const char *key_name,
 		return -ENOMEM;
 	}
 
-#if OZONE_REAL_IMPLEMENTATION
 	/* 
 	 * Real implementation using libhdfs to stat the key/object in Ozone
 	 * We construct the full o3fs path and use hdfsGetPathInfo to get metadata
@@ -591,32 +542,6 @@ int ofs_ozone_head_key(struct ozone_bucket *bucket, const char *key_name,
 	
 	LogDebug(COMPONENT_FSAL, "OFS: Successfully headed key %s: size=%zu, mtime=%ld, mode=0%o", 
 	         key_name, new_key->size, new_key->mtime, new_key->mode);
-	
-#else
-	/* Mock implementation when libhdfs is not available */
-	new_key->full_path = NULL; /* Not needed for mock */
-	
-	/* For mock implementation, only allow root directory and some test files */
-	if (strcmp(key_name, "/") == 0) {
-		/* Root directory always exists */
-		new_key->size = 4096;
-		new_key->mode = S_IFDIR | 0755;
-	} else if (strncmp(key_name, "test", 4) == 0) {
-		/* Allow keys starting with "test" for testing */
-		new_key->size = 1024;
-		new_key->mode = S_IFREG | 0644;
-	} else {
-		LogInfo(COMPONENT_FSAL, "OFS: Key not found (mock): %s", key_name);
-		gsh_free(new_key->name);
-		gsh_free(new_key);
-		return -ENOENT;
-	}
-	new_key->mtime = time(NULL);
-	new_key->uid = getuid();
-	new_key->gid = getgid();
-	
-	LogDebug(COMPONENT_FSAL, "OFS: Successfully headed key %s (mock mode)", key_name);
-#endif
 
 	*key = new_key;
 	return 0;
@@ -633,7 +558,6 @@ void ofs_ozone_disconnect(struct ozone_client *client)
 		LogInfo(COMPONENT_FSAL, "OFS: Disconnecting from Ozone service: %s",
 			client->service_uri ? client->service_uri : "(unknown)");
 		
-#if OZONE_REAL_IMPLEMENTATION
 		/* Close the HDFS filesystem connection */
 		if (client->fs) {
 			int disconnect_result = hdfsDisconnect(client->fs);
@@ -644,7 +568,6 @@ void ofs_ozone_disconnect(struct ozone_client *client)
 			client->fs = NULL;
 		}
 		LogDebug(COMPONENT_FSAL, "OFS: HDFS connection closed");
-#endif
 		
 		gsh_free(client->service_uri);
 		client->connected = false;
