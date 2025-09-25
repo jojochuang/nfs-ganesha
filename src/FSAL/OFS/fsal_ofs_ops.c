@@ -23,17 +23,30 @@
  */
 
 /* fsal_ofs_ops.c
- * OFS FSAL operations - stub implementations
+ * OFS FSAL additional operations (future implementations)
  */
 
 #include "config.h"
 #include "fsal.h"
+#include "fsal_ofs_internal.h"
 
 /**
- * @brief Stub implementation for OFS operations
+ * @brief Placeholder for additional OFS FSAL operations
  *
- * All operations return ERR_FSAL_NOTSUPP for now as this is a skeleton
- * implementation.
+ * This file can be used for implementing additional FSAL operations
+ * beyond the core LOOKUP/GETATTR/ACCESS that are implemented in
+ * fsal_ofs_handle.c
+ *
+ * Future operations to implement:
+ * - readdir
+ * - open/close
+ * - read/write
+ * - create/mkdir
+ * - unlink/rmdir
+ * - rename
+ * - symlink
+ * - setattr
+ * - etc.
  */
 
-/* Placeholder for future OFS operation implementations */
+/* For now, this file just needs to exist to satisfy the CMakeLists.txt build */

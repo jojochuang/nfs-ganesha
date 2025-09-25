@@ -182,8 +182,8 @@ static fsal_status_t ofs_lookup_path(struct fsal_export *exp_hdl,
 	/* Initialize the base FSAL object handle */
 	fsal_obj_handle_init(&ofs_handle->obj_handle, exp_hdl, DIRECTORY, true);
 	
-	/* Set up default operations - these would need to be OFS-specific */
-	fsal_default_obj_ops_init(&ofs_handle->obj_handle.obj_ops);
+	/* Set up OFS-specific operations */
+	ofs_handle_ops_init(&ofs_handle->obj_handle.obj_ops);
 	
 	/* Set basic attributes for root directory */
 	ofs_handle->obj_handle.fsid = exp_hdl->filesystem->fsid;

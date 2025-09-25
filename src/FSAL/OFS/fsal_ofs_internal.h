@@ -84,3 +84,6 @@ int ofs_ozone_get_bucket(struct ozone_volume *volume, const char *bucket_name,
 int ofs_ozone_head_key(struct ozone_bucket *bucket, const char *key_name,
 		       struct ozone_key **key);
 void ofs_ozone_disconnect(struct ozone_client *client);
+
+/* Handle operations function prototypes */
+void ofs_handle_ops_init(struct fsal_obj_ops *ops);
