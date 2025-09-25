@@ -33,6 +33,8 @@
 #include "fsal_ofs_internal.h"
 #include "nfs_core.h"
 #include "sal_data.h"
+#include "city.h"
+#include "citycrc.h"
 #include <time.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -223,6 +225,13 @@ static fsal_status_t ofs_lookup(struct fsal_obj_handle *parent,
 	/* Initialize the child handle */
 	child_hdl->key_name = full_key_name;
 	child_hdl->export = export;
+	
+	/* Set OFS-specific identifiers for stable file handles */
+	child_hdl->volume_id = CityHash32(export->volume_name, strlen(export->volume_name));
+	child_hdl->bucket_id = CityHash32(export->bucket_name, strlen(export->bucket_name));
+	/* Generate stable object ID from key name */
+	child_hdl->object_id = CityHash64(full_key_name, strlen(full_key_name));
+	child_hdl->generation = 1; /* Initial generation - TODO: get from Ozone metadata */
 
 	/* Initialize base FSAL object handle */
 	fsal_obj_handle_init(&child_hdl->obj_handle, &export->export, REGULAR_FILE, true);
@@ -232,7 +241,7 @@ static fsal_status_t ofs_lookup(struct fsal_obj_handle *parent,
 
 	/* Set handle properties */
 	child_hdl->obj_handle.fsid = parent->fsid;
-	child_hdl->obj_handle.fileid = 2; /* TODO: Generate unique fileid */
+	child_hdl->obj_handle.fileid = child_hdl->object_id;
 
 	/* Convert Ozone metadata to FSAL attributes if requested */
 	if (attrs_out != NULL) {
@@ -436,7 +445,250 @@ void ofs_handle_ops_init(struct fsal_obj_ops *ops)
 	ops->lookup = ofs_lookup;
 	ops->getattrs = ofs_getattrs; 
 	ops->test_access = ofs_test_access;
+	ops->handle_to_wire = ofs_handle_to_wire;
+	ops->handle_to_key = ofs_handle_to_key;
 	
 	/* Set other operations to unsupported for now */
 	fsal_default_obj_ops_init(ops);
+}
+
+/**
+ * @brief Compute CRC32C checksum for OFS file handle
+ *
+ * @param[in] fh   File handle structure (checksum field excluded from calculation)
+ *
+ * @return CRC32C checksum
+ */
+uint32_t ofs_compute_fh_checksum(const struct ofs_fh *fh)
+{
+	uint128 hash;
+	struct ofs_fh temp_fh;
+	
+	/* Make a copy and zero the checksum field for calculation */
+	temp_fh = *fh;
+	temp_fh.checksum = 0;
+	
+	/* Compute CRC32C hash */
+	hash = CityHashCrc128((const char *)&temp_fh, sizeof(temp_fh) - sizeof(temp_fh.checksum));
+	
+	/* Return lower 32 bits as checksum */
+	return (uint32_t)(hash.first & 0xFFFFFFFF);
+}
+
+/**
+ * @brief Encode OFS object handle to wire format
+ *
+ * @param[in]  obj_hdl   Object handle to encode
+ * @param[out] wire_fh   Wire format file handle
+ *
+ * @return FSAL status
+ */
+fsal_status_t ofs_encode_fh(const struct ofs_fsal_obj_handle *obj_hdl,
+			   struct ofs_fh *wire_fh)
+{
+	if (!obj_hdl || !wire_fh) {
+		return fsalstat(ERR_FSAL_INVAL, EINVAL);
+	}
+	
+	/* Initialize the wire format handle */
+	memset(wire_fh, 0, sizeof(*wire_fh));
+	
+	wire_fh->version = OFS_FH_VERSION;
+	wire_fh->flags = 0;
+	if (obj_hdl->obj_handle.type == DIRECTORY) {
+		wire_fh->flags |= OFS_FH_FLAG_DIRECTORY;
+	}
+	
+	/* Set export ID from the object's export */
+	wire_fh->export_id = (uint16_t)obj_hdl->export->export.export_id;
+	
+	/* Set OFS-specific identifiers */
+	wire_fh->volume_id = obj_hdl->volume_id;
+	wire_fh->bucket_id = obj_hdl->bucket_id;
+	wire_fh->object_id = obj_hdl->object_id;
+	wire_fh->generation = obj_hdl->generation;
+	
+	/* Compute and set checksum */
+	wire_fh->checksum = ofs_compute_fh_checksum(wire_fh);
+	
+	LogDebug(COMPONENT_FSAL,
+		 "OFS encode_fh: vol=%u, bucket=%u, obj=%lu, gen=%u, checksum=0x%x",
+		 wire_fh->volume_id, wire_fh->bucket_id, wire_fh->object_id,
+		 wire_fh->generation, wire_fh->checksum);
+	
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief Decode wire format file handle to OFS object handle
+ *
+ * @param[in]  exp_hdl   Export handle
+ * @param[in]  wire_fh   Wire format file handle
+ * @param[out] obj_hdl   Decoded object handle
+ *
+ * @return FSAL status
+ */
+fsal_status_t ofs_decode_fh(struct fsal_export *exp_hdl,
+			   const struct ofs_fh *wire_fh,
+			   struct ofs_fsal_obj_handle **obj_hdl)
+{
+	struct ofs_fsal_export *ofs_export;
+	struct ofs_fsal_obj_handle *ofs_handle;
+	uint32_t computed_checksum;
+	object_file_type_t obj_type;
+	
+	if (!exp_hdl || !wire_fh || !obj_hdl) {
+		return fsalstat(ERR_FSAL_INVAL, EINVAL);
+	}
+	
+	*obj_hdl = NULL;
+	ofs_export = container_of(exp_hdl, struct ofs_fsal_export, export);
+	
+	/* Verify handle version */
+	if (wire_fh->version != OFS_FH_VERSION) {
+		LogWarn(COMPONENT_FSAL,
+			"OFS decode_fh: Invalid handle version %u, expected %u",
+			wire_fh->version, OFS_FH_VERSION);
+		return fsalstat(ERR_FSAL_BADHANDLE, 0);
+	}
+	
+	/* Verify export ID matches */
+	if (wire_fh->export_id != exp_hdl->export_id) {
+		LogWarn(COMPONENT_FSAL,
+			"OFS decode_fh: Export ID mismatch %u != %u",
+			wire_fh->export_id, exp_hdl->export_id);
+		return fsalstat(ERR_FSAL_BADHANDLE, 0);
+	}
+	
+	/* Verify checksum */
+	computed_checksum = ofs_compute_fh_checksum(wire_fh);
+	if (computed_checksum != wire_fh->checksum) {
+		LogWarn(COMPONENT_FSAL,
+			"OFS decode_fh: Checksum mismatch 0x%x != 0x%x",
+			computed_checksum, wire_fh->checksum);
+		return fsalstat(ERR_FSAL_BADHANDLE, 0);
+	}
+	
+	/* Allocate new object handle */
+	ofs_handle = gsh_malloc(sizeof(struct ofs_fsal_obj_handle));
+	if (!ofs_handle) {
+		LogCrit(COMPONENT_FSAL, "OFS decode_fh: Failed to allocate handle");
+		return fsalstat(ERR_FSAL_NOMEM, ENOMEM);
+	}
+	
+	/* Determine object type from flags */
+	obj_type = (wire_fh->flags & OFS_FH_FLAG_DIRECTORY) ? DIRECTORY : REGULAR_FILE;
+	
+	/* Initialize the handle */
+	memset(ofs_handle, 0, sizeof(*ofs_handle));
+	ofs_handle->export = ofs_export;
+	ofs_handle->volume_id = wire_fh->volume_id;
+	ofs_handle->bucket_id = wire_fh->bucket_id;
+	ofs_handle->object_id = wire_fh->object_id;
+	ofs_handle->generation = wire_fh->generation;
+	
+	/* Generate key name from object ID (temporary implementation) */
+	if (wire_fh->object_id == 1) {
+		ofs_handle->key_name = gsh_strdup("/");
+	} else {
+		/* For now, use object ID as key name - this should be improved */
+		size_t key_len = snprintf(NULL, 0, "obj_%lu", wire_fh->object_id) + 1;
+		ofs_handle->key_name = gsh_malloc(key_len);
+		if (!ofs_handle->key_name) {
+			gsh_free(ofs_handle);
+			return fsalstat(ERR_FSAL_NOMEM, ENOMEM);
+		}
+		snprintf(ofs_handle->key_name, key_len, "obj_%lu", wire_fh->object_id);
+	}
+	
+	/* Initialize the base FSAL object handle */
+	fsal_obj_handle_init(&ofs_handle->obj_handle, exp_hdl, obj_type, true);
+	
+	/* Set up operations */
+	ofs_handle_ops_init(&ofs_handle->obj_handle.obj_ops);
+	
+	/* Set handle properties */
+	ofs_handle->obj_handle.fsid = exp_hdl->filesystem->fsid;
+	ofs_handle->obj_handle.fileid = wire_fh->object_id;
+	
+	*obj_hdl = ofs_handle;
+	
+	LogDebug(COMPONENT_FSAL,
+		 "OFS decode_fh: Successfully decoded handle vol=%u, bucket=%u, obj=%lu",
+		 wire_fh->volume_id, wire_fh->bucket_id, wire_fh->object_id);
+	
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief Convert object handle to wire format (FSAL operation)
+ *
+ * @param[in]     obj_hdl      Object handle
+ * @param[in]     output_type  Type of digest (NFSv3 or NFSv4)
+ * @param[in,out] fh_desc      Buffer descriptor for wire format
+ *
+ * @return FSAL status
+ */
+static fsal_status_t ofs_handle_to_wire(const struct fsal_obj_handle *obj_hdl,
+					fsal_digesttype_t output_type,
+					struct gsh_buffdesc *fh_desc)
+{
+	const struct ofs_fsal_obj_handle *ofs_hdl;
+	struct ofs_fh *wire_fh;
+	fsal_status_t status;
+	
+	if (!obj_hdl || !fh_desc) {
+		return fsalstat(ERR_FSAL_INVAL, EINVAL);
+	}
+	
+	ofs_hdl = container_of(obj_hdl, const struct ofs_fsal_obj_handle, obj_handle);
+	
+	LogDebug(COMPONENT_FSAL, "OFS handle_to_wire: obj_hdl=%p, type=%d", obj_hdl, output_type);
+	
+	switch (output_type) {
+	case FSAL_DIGEST_NFSV3:
+	case FSAL_DIGEST_NFSV4:
+		/* Check buffer size */
+		if (fh_desc->len < sizeof(struct ofs_fh)) {
+			LogMajor(COMPONENT_FSAL,
+				 "OFS handle_to_wire: Buffer too small %zu < %zu",
+				 fh_desc->len, sizeof(struct ofs_fh));
+			return fsalstat(ERR_FSAL_TOOSMALL, 0);
+		}
+		
+		wire_fh = (struct ofs_fh *)fh_desc->addr;
+		status = ofs_encode_fh(ofs_hdl, wire_fh);
+		if (FSAL_IS_ERROR(status)) {
+			return status;
+		}
+		
+		fh_desc->len = sizeof(struct ofs_fh);
+		break;
+		
+	default:
+		LogMajor(COMPONENT_FSAL, "OFS handle_to_wire: Unsupported output type %d", output_type);
+		return fsalstat(ERR_FSAL_SERVERFAULT, 0);
+	}
+	
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief Convert object handle to key format for caching
+ *
+ * @param[in]     obj_hdl   Object handle
+ * @param[in,out] fh_desc   Buffer descriptor for handle key
+ */
+static void ofs_handle_to_key(struct fsal_obj_handle *obj_hdl,
+			     struct gsh_buffdesc *fh_desc)
+{
+	struct ofs_fsal_obj_handle *ofs_hdl;
+	
+	ofs_hdl = container_of(obj_hdl, struct ofs_fsal_obj_handle, obj_handle);
+	
+	/* Use object ID as the key for caching */
+	fh_desc->addr = &ofs_hdl->object_id;
+	fh_desc->len = sizeof(ofs_hdl->object_id);
+	
+	LogDebug(COMPONENT_FSAL, "OFS handle_to_key: object_id=%lu", ofs_hdl->object_id);
 }

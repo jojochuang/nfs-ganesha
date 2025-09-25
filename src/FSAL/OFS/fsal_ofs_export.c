@@ -34,6 +34,7 @@
 #include "fsal_ofs_internal.h"
 #include "nfs_exports.h"
 #include "export_mgr.h"
+#include "city.h"
 
 /**
  * @brief Release an export
@@ -189,6 +190,13 @@ static fsal_status_t ofs_lookup_path(struct fsal_export *exp_hdl,
 	ofs_handle->obj_handle.fsid = exp_hdl->filesystem->fsid;
 	ofs_handle->obj_handle.fileid = 1; /* Root directory gets ID 1 */
 	
+	/* Set OFS-specific identifiers for stable file handles */
+	/* TODO: Get these from actual Ozone volume/bucket metadata */
+	ofs_handle->volume_id = CityHash32(ofs_export->volume_name, strlen(ofs_export->volume_name));
+	ofs_handle->bucket_id = CityHash32(ofs_export->bucket_name, strlen(ofs_export->bucket_name));
+	ofs_handle->object_id = 1; /* Root always gets object ID 1 */
+	ofs_handle->generation = 1; /* Initial generation */
+	
 	/* Fill in attributes if requested */
 	if (attrs_out != NULL) {
 		fsal_prepare_attrs(attrs_out, ATTR_TYPE | ATTR_MODE | ATTR_FILEID | ATTR_FSID);
@@ -223,8 +231,121 @@ static fsal_status_t ofs_create_handle(struct fsal_export *exp_hdl,
 				       struct fsal_obj_handle **handle,
 				       struct fsal_attrlist *attrs_out)
 {
-	LogDebug(COMPONENT_FSAL, "OFS create_handle called - not implemented");
-	return fsalstat(ERR_FSAL_NOTSUPP, 0);
+	struct ofs_fh *wire_fh;
+	struct ofs_fsal_obj_handle *ofs_handle;
+	fsal_status_t status;
+	
+	if (!exp_hdl || !hdl_desc || !handle) {
+		LogCrit(COMPONENT_FSAL, "OFS create_handle: Invalid arguments");
+		return fsalstat(ERR_FSAL_INVAL, EINVAL);
+	}
+	
+	*handle = NULL;
+	
+	/* Verify buffer size */
+	if (hdl_desc->len < sizeof(struct ofs_fh)) {
+		LogMajor(COMPONENT_FSAL,
+			 "OFS create_handle: Handle buffer too small %zu < %zu",
+			 hdl_desc->len, sizeof(struct ofs_fh));
+		return fsalstat(ERR_FSAL_BADHANDLE, 0);
+	}
+	
+	wire_fh = (struct ofs_fh *)hdl_desc->addr;
+	
+	/* Decode the wire format handle */
+	status = ofs_decode_fh(exp_hdl, wire_fh, &ofs_handle);
+	if (FSAL_IS_ERROR(status)) {
+		LogWarn(COMPONENT_FSAL, "OFS create_handle: Failed to decode handle");
+		return status;
+	}
+	
+	/* Fill in attributes if requested */
+	if (attrs_out != NULL) {
+		status = ofs_getattrs(&ofs_handle->obj_handle, attrs_out);
+		if (FSAL_IS_ERROR(status)) {
+			LogWarn(COMPONENT_FSAL, "OFS create_handle: Failed to get attributes");
+			/* Continue anyway - attributes are optional for create_handle */
+		}
+	}
+	
+	*handle = &ofs_handle->obj_handle;
+	
+	LogDebug(COMPONENT_FSAL, "OFS create_handle: Successfully created handle");
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
+}
+
+/**
+ * @brief Decode wire format handle (export operation)
+ *
+ * @param[in]     exp_hdl    Export handle
+ * @param[in]     in_type    Input digest type
+ * @param[in,out] fh_desc    Handle buffer descriptor
+ * @param[in]     flags      Decode flags
+ *
+ * @return FSAL status
+ */
+static fsal_status_t ofs_wire_to_host(struct fsal_export *exp_hdl,
+				      fsal_digesttype_t in_type,
+				      struct gsh_buffdesc *fh_desc,
+				      int flags)
+{
+	struct ofs_fh *wire_fh;
+	uint32_t computed_checksum;
+	
+	if (!exp_hdl || !fh_desc) {
+		return fsalstat(ERR_FSAL_INVAL, EINVAL);
+	}
+	
+	LogDebug(COMPONENT_FSAL, "OFS wire_to_host: type=%d, len=%zu", in_type, fh_desc->len);
+	
+	switch (in_type) {
+	case FSAL_DIGEST_NFSV3:
+	case FSAL_DIGEST_NFSV4:
+		/* Verify buffer size */
+		if (fh_desc->len < sizeof(struct ofs_fh)) {
+			LogMajor(COMPONENT_FSAL,
+				 "OFS wire_to_host: Handle too small %zu < %zu",
+				 fh_desc->len, sizeof(struct ofs_fh));
+			return fsalstat(ERR_FSAL_BADHANDLE, 0);
+		}
+		
+		wire_fh = (struct ofs_fh *)fh_desc->addr;
+		
+		/* Verify handle version */
+		if (wire_fh->version != OFS_FH_VERSION) {
+			LogWarn(COMPONENT_FSAL,
+				"OFS wire_to_host: Invalid version %u", wire_fh->version);
+			return fsalstat(ERR_FSAL_BADHANDLE, 0);
+		}
+		
+		/* Verify export ID */
+		if (wire_fh->export_id != exp_hdl->export_id) {
+			LogWarn(COMPONENT_FSAL,
+				"OFS wire_to_host: Export ID mismatch %u != %u",
+				wire_fh->export_id, exp_hdl->export_id);
+			return fsalstat(ERR_FSAL_BADHANDLE, 0);
+		}
+		
+		/* Verify checksum */
+		computed_checksum = ofs_compute_fh_checksum(wire_fh);
+		if (computed_checksum != wire_fh->checksum) {
+			LogWarn(COMPONENT_FSAL,
+				"OFS wire_to_host: Checksum mismatch 0x%x != 0x%x",
+				computed_checksum, wire_fh->checksum);
+			return fsalstat(ERR_FSAL_BADHANDLE, 0);
+		}
+		
+		/* Update length to exact handle size */
+		fh_desc->len = sizeof(struct ofs_fh);
+		break;
+		
+	default:
+		LogMajor(COMPONENT_FSAL, "OFS wire_to_host: Unsupported type %d", in_type);
+		return fsalstat(ERR_FSAL_SERVERFAULT, 0);
+	}
+	
+	LogDebug(COMPONENT_FSAL, "OFS wire_to_host: Successfully validated handle");
+	return fsalstat(ERR_FSAL_NO_ERROR, 0);
 }
 
 /**
@@ -237,4 +358,5 @@ void ofs_export_ops_init(struct export_ops *ops)
 	ops->release = ofs_release;
 	ops->lookup_path = ofs_lookup_path;
 	ops->create_handle = ofs_create_handle;
+	ops->wire_to_host = ofs_wire_to_host;
 }
