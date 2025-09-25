@@ -32,31 +32,50 @@
 #include "nfs_core.h"
 #include <string.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+#include <errno.h>
 
-/* Mock Ozone client structures for initial implementation */
+/* libhdfs is required for OFS FSAL */
+#include <hdfs.h>
+
+/* Real implementation using libhdfs for Ozone */
+
+/**
+ * Ozone client connection using libhdfs
+ * In Ozone, we connect via o3fs (Ozone FileSystem) which uses libhdfs
+ */
 struct ozone_client {
-	char *service_uri;
-	bool connected;
+	char *service_uri;		/* Ozone service URI */
+	hdfsFS fs;			/* HDFS filesystem handle for o3fs */
+	bool connected;			/* Connection status */
 };
 
 struct ozone_volume {
-	struct ozone_client *client;
-	char *name;
+	struct ozone_client *client;	/* Back pointer to client */
+	char *name;			/* Volume name */
+	char *o3fs_path;		/* Full o3fs:// path to volume */
 };
 
 struct ozone_bucket {
-	struct ozone_volume *volume;
-	char *name;
+	struct ozone_volume *volume;	/* Back pointer to volume */
+	char *name;			/* Bucket name */
+	char *o3fs_path;		/* Full o3fs:// path to bucket */
 };
 
 struct ozone_key {
-	struct ozone_bucket *bucket;
-	char *name;
-	size_t size;
-	time_t mtime;
-	mode_t mode;
-	uid_t uid;
-	gid_t gid;
+	struct ozone_bucket *bucket;	/* Back pointer to bucket */
+	char *name;			/* Key name */
+	char *full_path;		/* Full path in o3fs */
+	/* Metadata from hdfsFileInfo */
+	size_t size;			/* File size */
+	time_t mtime;			/* Modification time */
+	mode_t mode;			/* File mode */
+	uid_t uid;			/* User ID */
+	gid_t gid;			/* Group ID */
+	short replication;		/* Replication factor */
+	tOffset block_size;		/* Block size */
 };
 
 /**
@@ -218,11 +237,79 @@ int ofs_ozone_connect(const char *service_id, struct ozone_client **client)
 		gsh_free(new_client);
 		return -ENOMEM;
 	}
+
+	/* 
+	 * Connect to Ozone via o3fs (Ozone FileSystem)
+	 * o3fs URIs are of the form: o3fs://bucket.volume.service_id/path
+	 * For the connection, we create an HDFS connection to the Ozone service
+	 */
+	
+	/* Parse service_id to construct o3fs connection parameters */
+	char *host = NULL;
+	int port = 9862; /* Default Ozone OM port */
+	
+	/* Parse service_id like "ozone://hostname:port" or "hostname:port" */
+	const char *uri_to_parse = service_id;
+	if (strncmp(service_id, "ozone://", 8) == 0) {
+		uri_to_parse = service_id + 8;
+	}
+	
+	char *port_sep = strchr(uri_to_parse, ':');
+	if (port_sep) {
+		size_t host_len = port_sep - uri_to_parse;
+		host = gsh_malloc(host_len + 1);
+		if (!host) {
+			gsh_free(new_client->service_uri);
+			gsh_free(new_client);
+			return -ENOMEM;
+		}
+		memcpy(host, uri_to_parse, host_len);
+		host[host_len] = '\0';
+		port = atoi(port_sep + 1);
+	} else {
+		host = gsh_strdup(uri_to_parse);
+	}
+
+	if (!host) {
+		gsh_free(new_client->service_uri);
+		gsh_free(new_client);
+		return -ENOMEM;
+	}
+
+	/* Connect using libhdfs - for Ozone we connect to the O3FS scheme */
+	hdfsBuilder *builder = hdfsNewBuilder();
+	if (!builder) {
+		LogCrit(COMPONENT_FSAL, "OFS: Failed to create HDFS builder");
+		gsh_free(host);
+		gsh_free(new_client->service_uri);
+		gsh_free(new_client);
+		return -EIO;
+	}
+
+	hdfsBuilderSetNameNode(builder, host);
+	hdfsBuilderSetNameNodePort(builder, port);
+	
+	/* Set Ozone-specific configuration */
+	hdfsBuilderConfSetStr(builder, "fs.defaultFS", service_id);
+	hdfsBuilderConfSetStr(builder, "fs.o3fs.impl", "org.apache.hadoop.fs.ozone.OzoneFileSystem");
+	
+	new_client->fs = hdfsBuilderConnect(builder);
+	hdfsFreeBuilder(builder);
+	
+	if (!new_client->fs) {
+		LogCrit(COMPONENT_FSAL, "OFS: Failed to connect to Ozone service %s", service_id);
+		gsh_free(host);
+		gsh_free(new_client->service_uri);
+		gsh_free(new_client);
+		return -ECONNREFUSED;
+	}
+	
+	gsh_free(host);
 	new_client->connected = true;
+	
+	LogInfo(COMPONENT_FSAL, "OFS: Successfully connected to Ozone service via libhdfs");
 
 	*client = new_client;
-
-	LogInfo(COMPONENT_FSAL, "OFS: Successfully connected to Ozone service");
 	return 0;
 }
 
@@ -262,7 +349,34 @@ int ofs_ozone_get_volume(struct ozone_client *client, const char *volume_name,
 		return -ENOMEM;
 	}
 
+	/* 
+	 * In Ozone with libhdfs, volumes are logical groupings.
+	 * The o3fs path for a volume is: o3fs://bucket.volume.service/path
+	 * For volume validation, we construct the o3fs path and check if we can access it.
+	 */
+	
+	/* Create o3fs path for the volume - we'll use this for validation */
+	int path_len = snprintf(NULL, 0, "o3fs://%s.%s/", "tmpbucket", volume_name) + 1;
+	new_volume->o3fs_path = gsh_malloc(path_len);
+	if (!new_volume->o3fs_path) {
+		gsh_free(new_volume->name);
+		gsh_free(new_volume);
+		return -ENOMEM;
+	}
+	snprintf(new_volume->o3fs_path, path_len, "o3fs://%s.%s/", "tmpbucket", volume_name);
+	
+	/* 
+	 * In a real implementation, we might validate the volume exists by:
+	 * 1. Using Ozone REST API calls to check volume existence
+	 * 2. Or trying to list the volume contents
+	 * For now, we assume the volume exists if we got this far.
+	 */
+	
+	LogDebug(COMPONENT_FSAL, "OFS: Volume %s mapped to o3fs path: %s", 
+	         volume_name, new_volume->o3fs_path);
+
 	*volume = new_volume;
+	LogDebug(COMPONENT_FSAL, "OFS: Successfully retrieved volume: %s", volume_name);
 	return 0;
 }
 
@@ -298,7 +412,41 @@ int ofs_ozone_get_bucket(struct ozone_volume *volume, const char *bucket_name,
 		return -ENOMEM;
 	}
 
+	/* 
+	 * Construct the o3fs path for this bucket.
+	 * O3FS paths are: o3fs://bucket.volume.service/path
+	 * The bucket becomes the filesystem root for operations.
+	 */
+	
+	char *service_host = volume->client->service_uri;
+	/* Skip ozone:// prefix if present */
+	if (strncmp(service_host, "ozone://", 8) == 0) {
+		service_host += 8;
+	}
+	
+	int path_len = snprintf(NULL, 0, "o3fs://%s.%s.%s/", 
+	                       bucket_name, volume->name, service_host) + 1;
+	new_bucket->o3fs_path = gsh_malloc(path_len);
+	if (!new_bucket->o3fs_path) {
+		gsh_free(new_bucket->name);
+		gsh_free(new_bucket);
+		return -ENOMEM;
+	}
+	snprintf(new_bucket->o3fs_path, path_len, "o3fs://%s.%s.%s/", 
+	        bucket_name, volume->name, service_host);
+	
+	/*
+	 * In a real implementation, we might validate the bucket exists:
+	 * 1. Try to stat the bucket root path
+	 * 2. Use Ozone REST API to verify bucket existence
+	 * For now, we assume success if we got this far.
+	 */
+	
+	LogDebug(COMPONENT_FSAL, "OFS: Bucket %s mapped to o3fs path: %s", 
+	         bucket_name, new_bucket->o3fs_path);
+
 	*bucket = new_bucket;
+	LogDebug(COMPONENT_FSAL, "OFS: Successfully retrieved bucket: %s", bucket_name);
 	return 0;
 }
 
@@ -322,16 +470,6 @@ int ofs_ozone_head_key(struct ozone_bucket *bucket, const char *key_name,
 
 	LogDebug(COMPONENT_FSAL, "OFS: Heading key: %s", key_name);
 
-	/* For mock implementation, only allow root directory and some test files */
-	if (strcmp(key_name, "/") == 0) {
-		/* Root directory always exists */
-	} else if (strncmp(key_name, "test", 4) == 0) {
-		/* Allow keys starting with "test" for testing */
-	} else {
-		LogInfo(COMPONENT_FSAL, "OFS: Key not found (mock): %s", key_name);
-		return -ENOENT;
-	}
-
 	new_key = gsh_malloc(sizeof(struct ozone_key));
 	if (!new_key) {
 		return -ENOMEM;
@@ -344,20 +482,68 @@ int ofs_ozone_head_key(struct ozone_bucket *bucket, const char *key_name,
 		return -ENOMEM;
 	}
 
-	/* Set mock metadata */
-	if (strcmp(key_name, "/") == 0) {
-		new_key->size = 4096;
+	/* 
+	 * Real implementation using libhdfs to stat the key/object in Ozone
+	 * We construct the full o3fs path and use hdfsGetPathInfo to get metadata
+	 */
+	
+	/* Construct full path: bucket_path + key_name */
+	size_t full_path_len = strlen(bucket->o3fs_path) + strlen(key_name) + 1;
+	new_key->full_path = gsh_malloc(full_path_len);
+	if (!new_key->full_path) {
+		gsh_free(new_key->name);
+		gsh_free(new_key);
+		return -ENOMEM;
+	}
+	
+	/* Remove trailing slash from bucket path if key doesn't start with slash */
+	if (key_name[0] != '/' && bucket->o3fs_path[strlen(bucket->o3fs_path)-1] == '/') {
+		snprintf(new_key->full_path, full_path_len, "%s%s", bucket->o3fs_path, key_name);
+	} else if (key_name[0] == '/' && bucket->o3fs_path[strlen(bucket->o3fs_path)-1] != '/') {
+		snprintf(new_key->full_path, full_path_len, "%s%s", bucket->o3fs_path, key_name);
+	} else if (key_name[0] == '/' && bucket->o3fs_path[strlen(bucket->o3fs_path)-1] == '/') {
+		/* Remove one of the slashes */
+		snprintf(new_key->full_path, full_path_len, "%s%s", bucket->o3fs_path, key_name + 1);
+	} else {
+		snprintf(new_key->full_path, full_path_len, "%s/%s", bucket->o3fs_path, key_name);
+	}
+	
+	/* Use libhdfs to get file information */
+	hdfsFileInfo *file_info = hdfsGetPathInfo(bucket->volume->client->fs, new_key->full_path);
+	if (!file_info) {
+		/* File/key doesn't exist */
+		LogInfo(COMPONENT_FSAL, "OFS: Key not found: %s (path: %s)", 
+		        key_name, new_key->full_path);
+		gsh_free(new_key->full_path);
+		gsh_free(new_key->name);
+		gsh_free(new_key);
+		return -ENOENT;
+	}
+	
+	/* Extract metadata from hdfsFileInfo */
+	new_key->size = file_info->mSize;
+	new_key->mtime = file_info->mLastMod / 1000; /* Convert from milliseconds */
+	new_key->uid = 0; /* libhdfs may not provide meaningful UIDs for Ozone */
+	new_key->gid = 0;
+	new_key->replication = file_info->mReplication;
+	new_key->block_size = file_info->mBlockSize;
+	
+	/* Map file kind to mode */
+	if (file_info->mKind == kObjectKindFile) {
+		new_key->mode = S_IFREG | 0644;
+	} else if (file_info->mKind == kObjectKindDirectory) {
 		new_key->mode = S_IFDIR | 0755;
 	} else {
-		new_key->size = 1024;
-		new_key->mode = S_IFREG | 0644;
+		new_key->mode = S_IFREG | 0644; /* Default to regular file */
 	}
-	new_key->mtime = time(NULL);
-	new_key->uid = getuid();
-	new_key->gid = getgid();
+	
+	/* Free the hdfsFileInfo */
+	hdfsFreeFileInfo(file_info, 1);
+	
+	LogDebug(COMPONENT_FSAL, "OFS: Successfully headed key %s: size=%zu, mtime=%ld, mode=0%o", 
+	         key_name, new_key->size, new_key->mtime, new_key->mode);
 
 	*key = new_key;
-	LogDebug(COMPONENT_FSAL, "OFS: Successfully headed key: %s", key_name);
 	return 0;
 }
 
@@ -372,8 +558,21 @@ void ofs_ozone_disconnect(struct ozone_client *client)
 		LogInfo(COMPONENT_FSAL, "OFS: Disconnecting from Ozone service: %s",
 			client->service_uri ? client->service_uri : "(unknown)");
 		
+		/* Close the HDFS filesystem connection */
+		if (client->fs) {
+			int disconnect_result = hdfsDisconnect(client->fs);
+			if (disconnect_result != 0) {
+				LogWarn(COMPONENT_FSAL, "OFS: Warning - HDFS disconnect returned error: %d", 
+				        disconnect_result);
+			}
+			client->fs = NULL;
+		}
+		LogDebug(COMPONENT_FSAL, "OFS: HDFS connection closed");
+		
 		gsh_free(client->service_uri);
 		client->connected = false;
 		gsh_free(client);
+		
+		LogInfo(COMPONENT_FSAL, "OFS: Successfully disconnected from Ozone service");
 	}
 }
