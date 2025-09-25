@@ -25,12 +25,34 @@
 /* OFS internal definitions */
 
 #include "fsal.h"
+#include "citycrc.h"
 
 /* Forward declarations for Ozone client types */
 struct ozone_client;
 struct ozone_volume;
 struct ozone_bucket;
 struct ozone_key;
+
+/**
+ * @brief OFS file handle structure for wire format
+ *
+ * This structure defines the on-wire format for OFS file handles.
+ * It includes volume ID, bucket ID, object ID, generation counter,
+ * and CRC32C checksum for integrity verification.
+ */
+struct ofs_fh {
+	uint8_t version;	/* Handle format version (0x01) */
+	uint8_t flags;		/* Reserved flags */
+	uint16_t export_id;	/* Export ID for cross-export verification */
+	uint32_t volume_id;	/* Ozone volume identifier */
+	uint32_t bucket_id;	/* Ozone bucket identifier */
+	uint64_t object_id;	/* Ozone object identifier (stable across renames) */
+	uint32_t generation;	/* Generation counter for object versioning */
+	uint32_t checksum;	/* CRC32C checksum of above fields */
+} __attribute__((__packed__));
+
+#define OFS_FH_VERSION		0x01
+#define OFS_FH_FLAG_DIRECTORY	0x01
 
 /**
  * @brief OFS FSAL configuration parameters
@@ -61,6 +83,12 @@ struct ofs_fsal_obj_handle {
 	struct fsal_obj_handle obj_handle; /* Base handle */
 	char *key_name;			   /* Ozone key name */
 	struct ofs_fsal_export *export;   /* Back pointer to export */
+	
+	/* OFS-specific identifiers for stable file handles */
+	uint32_t volume_id;		   /* Ozone volume identifier */
+	uint32_t bucket_id;		   /* Ozone bucket identifier */
+	uint64_t object_id;		   /* Stable object identifier */
+	uint32_t generation;		   /* Object generation counter */
 };
 
 /* Function prototypes */
@@ -87,3 +115,11 @@ void ofs_ozone_disconnect(struct ozone_client *client);
 
 /* Handle operations function prototypes */
 void ofs_handle_ops_init(struct fsal_obj_ops *ops);
+
+/* Handle encoding/decoding function prototypes */
+fsal_status_t ofs_encode_fh(const struct ofs_fsal_obj_handle *obj_hdl,
+			   struct ofs_fh *wire_fh);
+fsal_status_t ofs_decode_fh(struct fsal_export *exp_hdl,
+			   const struct ofs_fh *wire_fh,
+			   struct ofs_fsal_obj_handle **obj_hdl);
+uint32_t ofs_compute_fh_checksum(const struct ofs_fh *fh);
