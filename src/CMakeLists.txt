@@ -1614,6 +1614,12 @@ else(USE_FSAL_MEM)
     set(BCOND_MEM "%bcond_with")
 endif(USE_FSAL_MEM)
 
+if(USE_FSAL_OFS)
+    set(BCOND_OFS "%bcond_without")
+else(USE_FSAL_OFS)
+    set(BCOND_OFS "%bcond_with")
+endif(USE_FSAL_OFS)
+
 if(USE_9P)
     set(BCOND_9P "%bcond_without")
     if(USE_9P_RDMA)

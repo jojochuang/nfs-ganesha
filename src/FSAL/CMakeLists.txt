@@ -72,5 +72,5 @@ if(USE_FSAL_MEM)
 endif(USE_FSAL_MEM)
 
 if(USE_FSAL_OFS)
-  add_subdirectory(FSAL_OFS)
+  add_subdirectory(OFS)
 endif(USE_FSAL_OFS)
