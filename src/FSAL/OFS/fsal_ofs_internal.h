@@ -115,6 +115,8 @@ void ofs_ozone_disconnect(struct ozone_client *client);
 
 /* Handle operations function prototypes */
 void ofs_handle_ops_init(struct fsal_obj_ops *ops);
+fsal_status_t ofs_getattrs(struct fsal_obj_handle *obj_hdl, 
+                           struct fsal_attrlist *attrs_out);
 
 /* Handle encoding/decoding function prototypes */
 fsal_status_t ofs_encode_fh(const struct ofs_fsal_obj_handle *obj_hdl,

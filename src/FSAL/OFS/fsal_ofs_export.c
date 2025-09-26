@@ -184,16 +184,16 @@ static fsal_status_t ofs_lookup_path(struct fsal_export *exp_hdl,
 	fsal_obj_handle_init(&ofs_handle->obj_handle, exp_hdl, DIRECTORY, true);
 	
 	/* Set up OFS-specific operations */
-	ofs_handle_ops_init(&ofs_handle->obj_handle.obj_ops);
+	ofs_handle_ops_init(ofs_handle->obj_handle.obj_ops);
 	
 	/* Set basic attributes for root directory */
-	ofs_handle->obj_handle.fsid = exp_hdl->filesystem->fsid;
+	ofs_handle->obj_handle.fsid = exp_hdl->root_fs->fsid;
 	ofs_handle->obj_handle.fileid = 1; /* Root directory gets ID 1 */
 	
 	/* Set OFS-specific identifiers for stable file handles */
 	/* TODO: Get these from actual Ozone volume/bucket metadata */
-	ofs_handle->volume_id = CityHash32(ofs_export->volume_name, strlen(ofs_export->volume_name));
-	ofs_handle->bucket_id = CityHash32(ofs_export->bucket_name, strlen(ofs_export->bucket_name));
+	ofs_handle->volume_id = (uint32_t)CityHash64(ofs_export->volume_name, strlen(ofs_export->volume_name));
+	ofs_handle->bucket_id = (uint32_t)CityHash64(ofs_export->bucket_name, strlen(ofs_export->bucket_name));
 	ofs_handle->object_id = 1; /* Root always gets object ID 1 */
 	ofs_handle->generation = 1; /* Initial generation */
 	

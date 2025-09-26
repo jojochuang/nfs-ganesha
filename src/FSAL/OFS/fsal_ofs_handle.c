@@ -294,7 +294,7 @@ static fsal_status_t ofs_lookup(struct fsal_obj_handle *parent,
  *
  * @return FSAL status
  */
-static fsal_status_t ofs_getattrs(struct fsal_obj_handle *obj_hdl,
+fsal_status_t ofs_getattrs(struct fsal_obj_handle *obj_hdl,
 				 struct fsal_attrlist *attrs_out)
 {
 	struct ofs_fsal_obj_handle *ofs_hdl;
