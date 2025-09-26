@@ -80,7 +80,7 @@ SET(fsalofs_LIB_SRCS
    fsal_ofs_util.c
 )
 
-add_library(fsalofs MODULE ${fsalofs_LIB_SRCS})
+add_library(fsalofs MODULE ${fsalofs_LIB_SRCS} $<TARGET_OBJECTS:hash>)
 add_sanitizers(fsalofs)
 
 # Include hdfs directories and link libraries (required)
