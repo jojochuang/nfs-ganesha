@@ -26,9 +26,59 @@ add_definitions(
 
 set( LIB_PREFIX 64)
 
-# libhdfs dependency is checked in main CMakeLists.txt
-# At this point, we know HDFS_INCLUDE_DIR and HDFS_LIBRARY are available
-add_definitions(-DUSE_LIBHDFS)
+# libhdfs is required for OFS FSAL - no mock mode
+message(STATUS "OFS FSAL: Checking for HDFS dependencies...")
+
+# Only search if not manually specified
+if(NOT HDFS_INCLUDE_DIR)
+  message(STATUS "OFS FSAL: Searching for hdfs.h...")
+  find_path(HDFS_INCLUDE_DIR hdfs.h
+    HINTS 
+      ENV HADOOP_HOME
+      ENV JAVA_HOME
+    PATH_SUFFIXES 
+      include
+      hadoop/include
+      include/hdfs
+      share/hadoop/common/lib/native/include
+  )
+else()
+  message(STATUS "OFS FSAL: Using manually specified HDFS_INCLUDE_DIR: ${HDFS_INCLUDE_DIR}")
+endif()
+
+if(NOT HDFS_LIBRARY)
+  message(STATUS "OFS FSAL: Searching for libhdfs...")
+  find_library(HDFS_LIBRARY
+    NAMES hdfs libhdfs
+    HINTS
+      ENV HADOOP_HOME
+      ENV JAVA_HOME
+    PATH_SUFFIXES 
+      lib
+      lib/native
+      hadoop/lib/native
+      share/hadoop/common/lib/native
+  )
+else()
+  message(STATUS "OFS FSAL: Using manually specified HDFS_LIBRARY: ${HDFS_LIBRARY}")
+endif()
+
+# Debug: Show what we found or didn't find
+message(STATUS "OFS FSAL: HDFS_INCLUDE_DIR = ${HDFS_INCLUDE_DIR}")
+message(STATUS "OFS FSAL: HDFS_LIBRARY = ${HDFS_LIBRARY}")
+
+if(HDFS_INCLUDE_DIR AND HDFS_LIBRARY)
+  message(STATUS "Found libhdfs: ${HDFS_LIBRARY}")
+  message(STATUS "Found hdfs.h: ${HDFS_INCLUDE_DIR}")
+  add_definitions(-DUSE_LIBHDFS)
+  set(HDFS_FOUND TRUE)
+else()
+  message(FATAL_ERROR "OFS FSAL requires libhdfs but it was not found. "
+    "Please install Apache Hadoop and set HADOOP_HOME environment variable, "
+    "or manually specify -DHDFS_INCLUDE_DIR and -DHDFS_LIBRARY. "
+    "See README.md for installation instructions.")
+  set(HDFS_FOUND FALSE)
+endif()
 
 ########### next target ###############
 
