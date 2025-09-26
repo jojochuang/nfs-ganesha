@@ -54,9 +54,38 @@ tar -xzf hadoop-3.3.4.tar.gz
 export HADOOP_HOME=/path/to/hadoop-3.3.4
 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
 
-# Ensure libhdfs is available
+# Ensure libhdfs is available at runtime
 export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 ```
+
+**Runtime Library Dependencies:**
+
+The OFS FSAL automatically embeds the libhdfs library path (RPATH) during build to ensure libhdfs can be found at runtime. However, if you encounter "libhdfs.so.0.0.0: cannot open shared object file" errors, you can:
+
+1. **Set LD_LIBRARY_PATH** (recommended for development):
+   ```bash
+   export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
+   ```
+
+2. **Create a systemd service override** (for production deployments):
+   ```bash
+   # Create override directory
+   sudo mkdir -p /etc/systemd/system/nfs-ganesha.service.d/
+   
+   # Add environment variable
+   sudo tee /etc/systemd/system/nfs-ganesha.service.d/hadoop.conf << EOF
+   [Service]
+   Environment="LD_LIBRARY_PATH=/path/to/hadoop/lib/native"
+   EOF
+   
+   sudo systemctl daemon-reload
+   ```
+
+3. **Add library to system path**:
+   ```bash
+   echo "/path/to/hadoop/lib/native" | sudo tee /etc/ld.so.conf.d/hadoop.conf
+   sudo ldconfig
+   ```
 
 The build system will detect libhdfs if:
 - `HADOOP_HOME` environment variable points to your Hadoop installation

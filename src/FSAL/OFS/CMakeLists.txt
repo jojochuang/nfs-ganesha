@@ -94,7 +94,25 @@ target_link_libraries(fsalofs
   ${LDFLAG_DISALLOW_UNDEF}
 )
 
-set_target_properties(fsalofs PROPERTIES VERSION 4.2.0 SOVERSION 4)
+# Set RPATH so libhdfs can be found at runtime without LD_LIBRARY_PATH
+# This embeds the libhdfs directory path into the fsalofs shared library,
+# solving the "libhdfs.so.0.0.0: cannot open shared object file" error
+# Note: RPATH is only needed for shared libraries, not static libraries
+get_filename_component(HDFS_LIBRARY_EXT "${HDFS_LIBRARY}" LAST_EXT)
+string(FIND "${HDFS_LIBRARY}" ".so" SO_FOUND)
+if(HDFS_LIBRARY_EXT STREQUAL ".dylib" OR SO_FOUND GREATER -1)
+  get_filename_component(HDFS_LIBRARY_DIR "${HDFS_LIBRARY}" DIRECTORY)
+  set_target_properties(fsalofs PROPERTIES 
+    VERSION 4.2.0 
+    SOVERSION 4
+    INSTALL_RPATH "${HDFS_LIBRARY_DIR}"
+    BUILD_WITH_INSTALL_RPATH TRUE
+  )
+  message(STATUS "Setting RPATH for libhdfs: ${HDFS_LIBRARY_DIR}")
+else()
+  set_target_properties(fsalofs PROPERTIES VERSION 4.2.0 SOVERSION 4)
+  message(STATUS "Using static libhdfs, no RPATH needed")
+endif()
 install(TARGETS fsalofs COMPONENT fsal DESTINATION ${FSAL_DESTINATION} )
 
 ########### install files ###############
