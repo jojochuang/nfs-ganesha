@@ -53,16 +53,23 @@
 #include "config.h"
 #include "fsal.h"
 #include "FSAL/fsal_commonlib.h"
+#include "FSAL/fsal_localfs.h"
 #include "fsal_convert.h"
 #include "fsal_ofs_internal.h"
 #include "nfs_core.h"
 #include "sal_data.h"
 #include "city.h"
-#include "citycrc.h"
 #include <time.h>
 #include <sys/stat.h>
 #include <string.h>
 #include <inttypes.h>
+
+/* Forward declarations */
+static fsal_status_t ofs_handle_to_wire(const struct fsal_obj_handle *obj_hdl,
+					fsal_digesttype_t output_type,
+					struct gsh_buffdesc *fh_desc);
+static void ofs_handle_to_key(struct fsal_obj_handle *obj_hdl,
+			     struct gsh_buffdesc *fh_desc);
 
 /**
  * @brief Convert Ozone key metadata to NFS attributes
@@ -114,7 +121,7 @@ static fsal_status_t ofs_ozone_key_to_attrs(struct ozone_key *key,
 		attrs->type = DIRECTORY;
 		attrs->mode = 0755;
 		attrs->fileid = 1;
-		attrs->size = 4096; /* Standard directory size */
+		attrs->filesize = 4096; /* Standard directory size */
 		attrs->numlinks = 2; /* . and .. */
 	} else {
 		/* Regular file - for now, all non-root keys are treated as files */
@@ -126,9 +133,9 @@ static fsal_status_t ofs_ozone_key_to_attrs(struct ozone_key *key,
 		/* Extract size from Ozone key if available */
 		if (key) {
 			/* TODO: Extract from actual Ozone key metadata when available */
-			attrs->size = 1024; /* Mock size for now */
+			attrs->filesize = 1024; /* Mock size for now */
 		} else {
-			attrs->size = 0;
+			attrs->filesize = 0;
 		}
 	}
 
@@ -144,7 +151,7 @@ static fsal_status_t ofs_ozone_key_to_attrs(struct ozone_key *key,
 	attrs->ctime = current_time;
 
 	/* Set filesystem ID */
-	attrs->fsid = op_ctx->fsal_export->filesystem->fsid;
+	attrs->fsid = op_ctx->fsal_export->root_fs->fsid;
 
 	/* Mark all requested attributes as valid */
 	attrs->valid_mask = attrs->request_mask;
@@ -152,7 +159,7 @@ static fsal_status_t ofs_ozone_key_to_attrs(struct ozone_key *key,
 	LogDebug(COMPONENT_FSAL,
 		 "OFS: Mapped key %s to attrs - type=%d, mode=0%o, size=%zu, fileid=%"PRIu64,
 		 key_name ? key_name : "(null)",
-		 attrs->type, attrs->mode, attrs->size, attrs->fileid);
+		 attrs->type, attrs->mode, attrs->filesize, attrs->fileid);
 
 	return fsalstat(ERR_FSAL_NO_ERROR, 0);
 }
@@ -251,8 +258,8 @@ static fsal_status_t ofs_lookup(struct fsal_obj_handle *parent,
 	child_hdl->export = export;
 	
 	/* Set OFS-specific identifiers for stable file handles */
-	child_hdl->volume_id = CityHash32(export->volume_name, strlen(export->volume_name));
-	child_hdl->bucket_id = CityHash32(export->bucket_name, strlen(export->bucket_name));
+	child_hdl->volume_id = (uint32_t)CityHash64(export->volume_name, strlen(export->volume_name));
+	child_hdl->bucket_id = (uint32_t)CityHash64(export->bucket_name, strlen(export->bucket_name));
 	/* Generate stable object ID from key name */
 	child_hdl->object_id = CityHash64(full_key_name, strlen(full_key_name));
 	child_hdl->generation = 1; /* Initial generation - TODO: get from Ozone metadata */
@@ -261,7 +268,7 @@ static fsal_status_t ofs_lookup(struct fsal_obj_handle *parent,
 	fsal_obj_handle_init(&child_hdl->obj_handle, &export->export, REGULAR_FILE, true);
 	
 	/* Set up object operations */
-	ofs_handle_ops_init(&child_hdl->obj_handle.obj_ops);
+	ofs_handle_ops_init(child_hdl->obj_handle.obj_ops);
 
 	/* Set handle properties */
 	child_hdl->obj_handle.fsid = parent->fsid;
@@ -354,7 +361,7 @@ fsal_status_t ofs_getattrs(struct fsal_obj_handle *obj_hdl,
  * @param[in]  access_type      Access type to test
  * @param[out] supported        Supported access types (optional)
  * @param[out] allowed          Allowed access types (optional)
- * @param[in]  owner_override   Owner override flag (optional)
+ * @param[in]  owner_skip       Skip owner permission check
  *
  * @return FSAL status
  */
@@ -362,7 +369,7 @@ static fsal_status_t ofs_test_access(struct fsal_obj_handle *obj_hdl,
 				     fsal_accessflags_t access_type,
 				     fsal_accessflags_t *supported,
 				     fsal_accessflags_t *allowed,
-				     bool *owner_override)
+				     bool owner_skip)
 {
 	struct fsal_attrlist attrs;
 	fsal_status_t status;
@@ -393,12 +400,12 @@ static fsal_status_t ofs_test_access(struct fsal_obj_handle *obj_hdl,
 	gid = attrs.group;
 
 	/* Check if user is owner */
-	if (op_ctx->creds && op_ctx->creds->caller_uid == uid) {
+	if (op_ctx->creds.caller_uid == uid) {
 		is_owner = true;
 	}
 
 	/* Check if user is in group */
-	if (op_ctx->creds && (op_ctx->creds->caller_gid == gid)) {
+	if (op_ctx->creds.caller_gid == gid) {
 		is_group = true;
 	}
 	
@@ -437,8 +444,12 @@ static fsal_status_t ofs_test_access(struct fsal_obj_handle *obj_hdl,
 	if (allowed) {
 		*allowed = allowed_access;
 	}
-	if (owner_override) {
-		*owner_override = is_owner;
+	/* Skip access check if owner_skip is true and user is owner */
+	if (owner_skip && is_owner) {
+		if (allowed) {
+			*allowed = supported_access;  /* Grant all access to owner */
+		}
+		return fsalstat(ERR_FSAL_NO_ERROR, 0);
 	}
 
 	/* Check if requested access is allowed */
@@ -492,8 +503,8 @@ uint32_t ofs_compute_fh_checksum(const struct ofs_fh *fh)
 	temp_fh = *fh;
 	temp_fh.checksum = 0;
 	
-	/* Compute CRC32C hash */
-	hash = CityHashCrc128((const char *)&temp_fh, sizeof(temp_fh) - sizeof(temp_fh.checksum));
+	/* Compute hash using CityHash128 (always available) */
+	hash = CityHash128((const char *)&temp_fh, sizeof(temp_fh) - sizeof(temp_fh.checksum));
 	
 	/* Return lower 32 bits as checksum */
 	return (uint32_t)(hash.first & 0xFFFFFFFF);
@@ -629,10 +640,10 @@ fsal_status_t ofs_decode_fh(struct fsal_export *exp_hdl,
 	fsal_obj_handle_init(&ofs_handle->obj_handle, exp_hdl, obj_type, true);
 	
 	/* Set up operations */
-	ofs_handle_ops_init(&ofs_handle->obj_handle.obj_ops);
+	ofs_handle_ops_init(ofs_handle->obj_handle.obj_ops);
 	
 	/* Set handle properties */
-	ofs_handle->obj_handle.fsid = exp_hdl->filesystem->fsid;
+	ofs_handle->obj_handle.fsid = exp_hdl->root_fs->fsid;
 	ofs_handle->obj_handle.fileid = wire_fh->object_id;
 	
 	*obj_hdl = ofs_handle;

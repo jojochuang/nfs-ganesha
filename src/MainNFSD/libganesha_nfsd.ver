@@ -13,6 +13,7 @@
   check_verifier_attrlist;
   check_verifier_stat;
   CityHash64;
+  CityHash128;
   clear_op_context_export;
   close_fsal_fd;
   compound_data_Free;

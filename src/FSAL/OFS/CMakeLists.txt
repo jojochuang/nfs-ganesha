@@ -50,6 +50,12 @@ find_library(HDFS_LIBRARY
     share/hadoop/common/lib/native
 )
 
+# On macOS, prefer static library to avoid ELF/Mach-O compatibility issues
+if(APPLE AND EXISTS "${CMAKE_CURRENT_BINARY_DIR}/../hadoop-3.4.0/lib/native/libhdfs.a")
+  set(HDFS_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/../hadoop-3.4.0/lib/native/libhdfs.a")
+  message(STATUS "Using static libhdfs for macOS compatibility: ${HDFS_LIBRARY}")
+endif()
+
 if(HDFS_INCLUDE_DIR AND HDFS_LIBRARY)
   message(STATUS "Found libhdfs: ${HDFS_LIBRARY}")
   message(STATUS "Found hdfs.h: ${HDFS_INCLUDE_DIR}")

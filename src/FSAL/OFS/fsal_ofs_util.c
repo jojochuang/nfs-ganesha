@@ -277,7 +277,7 @@ int ofs_ozone_connect(const char *service_id, struct ozone_client **client)
 	}
 
 	/* Connect using libhdfs - for Ozone we connect to the O3FS scheme */
-	hdfsBuilder *builder = hdfsNewBuilder();
+	struct hdfsBuilder *builder = hdfsNewBuilder();
 	if (!builder) {
 		LogCrit(COMPONENT_FSAL, "OFS: Failed to create HDFS builder");
 		gsh_free(host);
