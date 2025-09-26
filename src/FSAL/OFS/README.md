@@ -183,7 +183,7 @@ The build system will automatically detect libhdfs if:
 - `HADOOP_HOME` environment variable points to your Hadoop installation
 - OR you manually specify: `-DHDFS_INCLUDE_DIR=/path/to/hdfs/include -DHDFS_LIBRARY=/path/to/libhdfs.so`
 
-If libhdfs is not found, the build will automatically fall back to mock mode with a warning.
+If libhdfs is not found, the OFS FSAL build will be automatically disabled with a warning.
 
 ## Configuration
 

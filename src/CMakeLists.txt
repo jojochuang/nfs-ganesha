@@ -924,7 +924,48 @@ gopt_test(USE_FSAL_MEM)
 # MEM has no dependencies
 
 gopt_test(USE_FSAL_OFS)
-# OFS has no dependencies
+if(USE_FSAL_OFS)
+  # OFS FSAL requires libhdfs from Apache Hadoop
+  find_path(HDFS_INCLUDE_DIR hdfs.h
+    HINTS 
+      ENV HADOOP_HOME
+      ENV JAVA_HOME
+    PATH_SUFFIXES 
+      include
+      hadoop/include
+      include/hdfs
+      share/hadoop/common/lib/native/include
+  )
+
+  find_library(HDFS_LIBRARY
+    NAMES hdfs libhdfs
+    HINTS
+      ENV HADOOP_HOME
+      ENV JAVA_HOME
+    PATH_SUFFIXES 
+      lib
+      lib/native
+      hadoop/lib/native
+      share/hadoop/common/lib/native
+  )
+
+  if(HDFS_INCLUDE_DIR AND HDFS_LIBRARY)
+    message(STATUS "Found libhdfs: ${HDFS_LIBRARY}")
+    message(STATUS "Found hdfs.h: ${HDFS_INCLUDE_DIR}")
+    set(HDFS_FOUND TRUE)
+  else()
+    if(USE_FSAL_OFS_REQUIRED)
+      message(FATAL_ERROR "OFS FSAL requires libhdfs but it was not found. "
+        "Please install Apache Hadoop and set HADOOP_HOME environment variable, "
+        "or manually specify -DHDFS_INCLUDE_DIR and -DHDFS_LIBRARY. "
+        "See README.md for installation instructions.")
+    else(USE_FSAL_OFS_REQUIRED)
+      message(WARNING "Cannot find libhdfs. Disabling OFS fsal build")
+      set(USE_FSAL_OFS OFF)
+    endif(USE_FSAL_OFS_REQUIRED)
+    set(HDFS_FOUND FALSE)
+  endif()
+endif(USE_FSAL_OFS)
 
 # sort out which allocator to use
 if(${ALLOCATOR} STREQUAL "jemalloc")
