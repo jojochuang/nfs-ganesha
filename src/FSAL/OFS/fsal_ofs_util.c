@@ -294,7 +294,8 @@ int ofs_ozone_connect(const char *service_id, struct ozone_client **client)
 	hdfsBuilderConfSetStr(builder, "fs.o3fs.impl", "org.apache.hadoop.fs.ozone.OzoneFileSystem");
 	
 	new_client->fs = hdfsBuilderConnect(builder);
-	hdfsFreeBuilder(builder);
+	/* Note: hdfsBuilderConnect takes ownership of the builder and frees it
+	 * internally, so we should NOT call hdfsFreeBuilder here */
 	
 	if (!new_client->fs) {
 		LogCrit(COMPONENT_FSAL, "OFS: Failed to connect to Ozone service %s", service_id);
