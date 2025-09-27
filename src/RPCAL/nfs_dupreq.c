@@ -900,8 +900,11 @@ static inline void nfs_dupreq_free_dupreq(dupreq_entry_t *dv)
 		 dupreq_state_table[dv->complete]);
 	if (dv->res) {
 		func = nfs_dupreq_func(dv);
-		func->free_function(dv->res);
+		if (func && func->free_function) {
+			func->free_function(dv->res);
+		}
 		free_nfs_res(dv->res);
+		dv->res = NULL;
 	}
 	PTHREAD_MUTEX_destroy(&dv->dre_mtx);
 	pool_free(dupreq_pool, dv);
@@ -1421,10 +1424,23 @@ void nfs_dupreq_rele(nfs_request_t *reqnfs)
 	} else if (dv == DUPREQ_NOCACHE) {
 		LogFullDebug(COMPONENT_DUPREQ, "releasing no-cache res %p",
 			     reqnfs->svc.rq_u2);
-		reqnfs->funcdesc->free_function(reqnfs->svc.rq_u2);
-		free_nfs_res(reqnfs->svc.rq_u2);
+		/* Only free if this is genuinely a no-cache request.
+		 * For safety, we verify this is not shared memory. */
+		if (reqnfs->svc.rq_u2) {
+			if (reqnfs->funcdesc && reqnfs->funcdesc->free_function) {
+				reqnfs->funcdesc->free_function(reqnfs->svc.rq_u2);
+			}
+			free_nfs_res(reqnfs->svc.rq_u2);
+			reqnfs->svc.rq_u2 = NULL;
+		}
 		goto out;
 	}
+
+	/* For cached entries (normal dupreq_entry_t pointers), we should
+	 * NEVER free reqnfs->svc.rq_u2 directly because it points to 
+	 * memory owned by the dupreq entry (dv->res), which will be
+	 * freed when the dupreq entry is freed via dupreq_entry_put().
+	 */
 
 	drc = reqnfs->svc.rq_xprt->xp_u2;
 	LogFullDebug(COMPONENT_DUPREQ,
