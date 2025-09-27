@@ -350,14 +350,36 @@ fsal_status_t ofs_create_export(struct fsal_module *fsal_hdl,
 	myself->export_path = gsh_strdup(CTX_FULLPATH(op_ctx));
 	op_ctx->fsal_export = &myself->export;
 
-	/* Initialize Ozone client connection */
-	/* TODO: These should come from configuration parameters */
-	myself->volume_name = gsh_strdup("default-volume");
-	myself->bucket_name = gsh_strdup("default-bucket");
+	/* Initialize Ozone client connection using module configuration */
+	struct ofs_fsal_module *ofs_module = 
+		container_of(fsal_hdl, struct ofs_fsal_module, fsal);
 	
-	/* Connect to Ozone service */
-	/* TODO: Service ID should come from configuration */
-	retval = ofs_ozone_connect("ozone://localhost:9862", &myself->client);
+	char *volume_name = NULL, *bucket_name = NULL, *service_uri = NULL;
+	
+	/* Parse OzoneURI configuration to extract components */
+	if (ofs_module->conf.ozone_uri != NULL) {
+		retval = ofs_parse_ozone_uri(ofs_module->conf.ozone_uri, 
+					     &volume_name, &bucket_name, &service_uri);
+		if (retval != 0) {
+			LogCrit(COMPONENT_FSAL, 
+				"OFS: Failed to parse OzoneURI: %s", 
+				ofs_module->conf.ozone_uri);
+			fsal_status = posix2fsal_status(EINVAL);
+			goto err_cleanup;
+		}
+	} else {
+		/* Use defaults if no configuration provided */
+		volume_name = gsh_strdup("default-volume");
+		bucket_name = gsh_strdup("default-bucket");
+		service_uri = gsh_strdup("ozone://localhost:9862");
+	}
+	
+	myself->volume_name = volume_name;
+	myself->bucket_name = bucket_name;
+	
+	/* Connect to Ozone service using configured service URI */
+	retval = ofs_ozone_connect(service_uri, &myself->client);
+	gsh_free(service_uri); /* No longer needed after connection */
 	if (retval != 0) {
 		LogCrit(COMPONENT_FSAL, 
 			"OFS: Failed to connect to Ozone service: %d", retval);

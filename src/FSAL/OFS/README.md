@@ -102,16 +102,16 @@ Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settin
     <description>Storage Container Manager addresses</description>
   </property>
 
-  <!-- Enable o3fs filesystem -->
+  <!-- Enable ofs filesystem -->
   <property>
-    <name>fs.o3fs.impl</name>
+    <name>fs.ofs.impl</name>
     <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
   </property>
 
   <!-- Default filesystem (optional) -->
   <property>
     <name>fs.defaultFS</name>
-    <value>o3fs://bucket.volume.ozone-om.example.com</value>
+    <value>ofs://bucket.volume.ozone-om.example.com</value>
   </property>
 
   <!-- Ozone client settings -->
@@ -142,7 +142,7 @@ Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settin
     <value>localhost:9860</value>
   </property>
   <property>
-    <name>fs.o3fs.impl</name>
+    <name>fs.ofs.impl</name>
     <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
   </property>
 </configuration>
@@ -161,7 +161,7 @@ Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settin
     <value>scm1.cluster.com:9860,scm2.cluster.com:9860,scm3.cluster.com:9860</value>
   </property>
   <property>
-    <name>fs.o3fs.impl</name>
+    <name>fs.ofs.impl</name>
     <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
   </property>
   <property>
@@ -261,18 +261,18 @@ The core Ozone client is now fully implemented with:
 - libhdfs-based implementation for production Ozone clusters
 - Proper connection management and error handling
 - Metadata extraction using hdfsGetPathInfo
-- Support for o3fs:// URI scheme
+- Support for ofs:// URI scheme
 
 ### Implementation Notes
 
 The Ozone implementation uses:
 - **libhdfs** C API as the underlying transport
-- **o3fs** (Ozone FileSystem) scheme for path construction
+- **ofs** (Ozone FileSystem) scheme for path construction
 - **hdfsGetPathInfo** for metadata operations (stat/head)
 - **hdfsDisconnect** for proper cleanup
 
 Path mapping:
-- Ozone `volume/bucket/key` → o3fs `o3fs://bucket.volume.service/key`
+- Ozone `volume/bucket/key` → ofs `ofs://bucket.volume.service/key`
 - Service URIs support both `ozone://host:port` and plain `host:port` formats
 - Automatic slash handling for proper path construction
 
@@ -293,15 +293,15 @@ The OFS FSAL now includes a complete configuration system:
 The OFS FSAL implements a complete Ozone client API using libhdfs:
 
 #### Functions Implemented:
-- ✅ `ofs_ozone_connect()` - Connect to Ozone service via libhdfs/o3fs
-- ✅ `ofs_ozone_get_volume()` - Get volume handle with o3fs path construction  
-- ✅ `ofs_ozone_get_bucket()` - Get bucket handle with o3fs path construction
+- ✅ `ofs_ozone_connect()` - Connect to Ozone service via libhdfs/ofs
+- ✅ `ofs_ozone_get_volume()` - Get volume handle with ofs path construction  
+- ✅ `ofs_ozone_get_bucket()` - Get bucket handle with ofs path construction
 - ✅ `ofs_ozone_head_key()` - Head (stat) operation using hdfsGetPathInfo
 - ✅ `ofs_ozone_disconnect()` - Proper cleanup of HDFS connections
 
 #### Implementation Details:
 - Uses Apache Hadoop's libhdfs C API to connect to Ozone clusters
-- Constructs o3fs:// URIs (e.g., `o3fs://bucket.volume.service/path`) 
+- Constructs ofs:// URIs (e.g., `ofs://bucket.volume.service/path`) 
 - Maps Ozone operations to HDFS filesystem operations
 - Supports metadata extraction (size, mtime, mode, replication, block size)
 - Proper error handling and connection management
