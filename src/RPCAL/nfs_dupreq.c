@@ -902,6 +902,7 @@ static inline void nfs_dupreq_free_dupreq(dupreq_entry_t *dv)
 		func = nfs_dupreq_func(dv);
 		func->free_function(dv->res);
 		free_nfs_res(dv->res);
+		dv->res = NULL;
 	}
 	PTHREAD_MUTEX_destroy(&dv->dre_mtx);
 	pool_free(dupreq_pool, dv);
@@ -1421,8 +1422,11 @@ void nfs_dupreq_rele(nfs_request_t *reqnfs)
 	} else if (dv == DUPREQ_NOCACHE) {
 		LogFullDebug(COMPONENT_DUPREQ, "releasing no-cache res %p",
 			     reqnfs->svc.rq_u2);
-		reqnfs->funcdesc->free_function(reqnfs->svc.rq_u2);
-		free_nfs_res(reqnfs->svc.rq_u2);
+		if (reqnfs->svc.rq_u2) {
+			reqnfs->funcdesc->free_function(reqnfs->svc.rq_u2);
+			free_nfs_res(reqnfs->svc.rq_u2);
+			reqnfs->svc.rq_u2 = NULL;
+		}
 		goto out;
 	}
 
