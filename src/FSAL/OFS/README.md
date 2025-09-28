@@ -105,7 +105,7 @@ Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settin
   <!-- Enable ofs filesystem -->
   <property>
     <name>fs.ofs.impl</name>
-    <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
+    <value>org.apache.hadoop.fs.ozone.RootedOzoneFileSystem</value>
   </property>
 
   <!-- Default filesystem (optional) -->
@@ -143,7 +143,7 @@ Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settin
   </property>
   <property>
     <name>fs.ofs.impl</name>
-    <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
+    <value>org.apache.hadoop.fs.ozone.RootedOzoneFileSystem</value>
   </property>
 </configuration>
 ```
@@ -162,7 +162,7 @@ Create or update `$OZONE_CONF_DIR/ozone-site.xml` with your Ozone cluster settin
   </property>
   <property>
     <name>fs.ofs.impl</name>
-    <value>org.apache.hadoop.fs.ozone.OzoneFileSystem</value>
+    <value>org.apache.hadoop.fs.ozone.RootedOzoneFileSystem</value>
   </property>
   <property>
     <name>ozone.security.enabled</name>
