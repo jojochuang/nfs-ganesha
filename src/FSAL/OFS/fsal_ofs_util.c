@@ -291,7 +291,7 @@ int ofs_ozone_connect(const char *service_id, struct ozone_client **client)
 	
 	/* Set Ozone-specific configuration */
 	hdfsBuilderConfSetStr(builder, "fs.defaultFS", service_id);
-	hdfsBuilderConfSetStr(builder, "fs.ofs.impl", "org.apache.hadoop.fs.ozone.OzoneFileSystem");
+	hdfsBuilderConfSetStr(builder, "fs.ofs.impl", "org.apache.hadoop.fs.ozone.RootedOzoneFileSystem");
 	
 	new_client->fs = hdfsBuilderConnect(builder);
 	if (!new_client->fs) {
@@ -351,19 +351,26 @@ int ofs_ozone_get_volume(struct ozone_client *client, const char *volume_name,
 
 	/* 
 	 * In Ozone with libhdfs, volumes are logical groupings.
-	 * The ofs path for a volume is: ofs://bucket.volume.service/path
-	 * For volume validation, we construct the ofs path and check if we can access it.
+	 * The ofs path for a volume is: ofs://service_id/volume_name/bucket_name/path
+	 * For volume validation, we construct the volume base path.
 	 */
 	
-	/* Create ofs path for the volume - we'll use this for validation */
-	int path_len = snprintf(NULL, 0, "ofs://%s.%s/", "tmpbucket", volume_name) + 1;
+	/* Get service host from client URI */
+	char *service_host = client->service_uri;
+	/* Skip ozone:// prefix if present */
+	if (strncmp(service_host, "ozone://", 8) == 0) {
+		service_host += 8;
+	}
+	
+	/* Create ofs path base for the volume - this will be used for bucket path construction */
+	int path_len = snprintf(NULL, 0, "ofs://%s/%s", service_host, volume_name) + 1;
 	new_volume->ofs_path = gsh_malloc(path_len);
 	if (!new_volume->ofs_path) {
 		gsh_free(new_volume->name);
 		gsh_free(new_volume);
 		return -ENOMEM;
 	}
-	snprintf(new_volume->ofs_path, path_len, "ofs://%s.%s/", "tmpbucket", volume_name);
+	snprintf(new_volume->ofs_path, path_len, "ofs://%s/%s", service_host, volume_name);
 	
 	/* 
 	 * In a real implementation, we might validate the volume exists by:
@@ -414,26 +421,19 @@ int ofs_ozone_get_bucket(struct ozone_volume *volume, const char *bucket_name,
 
 	/* 
 	 * Construct the ofs path for this bucket.
-	 * OFS paths are: ofs://bucket.volume.service/path
+	 * OFS paths are: ofs://service_id/volume_name/bucket_name/path
 	 * The bucket becomes the filesystem root for operations.
 	 */
 	
-	char *service_host = volume->client->service_uri;
-	/* Skip ozone:// prefix if present */
-	if (strncmp(service_host, "ozone://", 8) == 0) {
-		service_host += 8;
-	}
-	
-	int path_len = snprintf(NULL, 0, "ofs://%s.%s.%s/", 
-	                       bucket_name, volume->name, service_host) + 1;
+	/* Construct the full ofs path using volume base path */
+	int path_len = snprintf(NULL, 0, "%s/%s/", volume->ofs_path, bucket_name) + 1;
 	new_bucket->ofs_path = gsh_malloc(path_len);
 	if (!new_bucket->ofs_path) {
 		gsh_free(new_bucket->name);
 		gsh_free(new_bucket);
 		return -ENOMEM;
 	}
-	snprintf(new_bucket->ofs_path, path_len, "ofs://%s.%s.%s/", 
-	        bucket_name, volume->name, service_host);
+	snprintf(new_bucket->ofs_path, path_len, "%s/%s/", volume->ofs_path, bucket_name);
 	
 	/*
 	 * In a real implementation, we might validate the bucket exists:
