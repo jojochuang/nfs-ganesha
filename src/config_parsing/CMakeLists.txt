@@ -42,6 +42,23 @@ FLEX_TARGET(
 
 ADD_FLEX_BISON_DEPENDENCY(ConfigScanner ConfigParser)
 
+# Suppress warnings for generated parser code
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+  set_source_files_properties(
+    ${BISON_ConfigParser_OUTPUTS}
+    ${FLEX_ConfigScanner_OUTPUTS}
+    PROPERTIES
+    COMPILE_FLAGS "-Wno-unused-but-set-variable -Wno-unused-variable"
+  )
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU")
+  set_source_files_properties(
+    ${BISON_ConfigParser_OUTPUTS}
+    ${FLEX_ConfigScanner_OUTPUTS}
+    PROPERTIES
+    COMPILE_FLAGS "-Wno-unused-but-set-variable -Wno-unused-variable"
+  )
+endif()
+
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
 ########### next target ###############
